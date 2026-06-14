@@ -1,0 +1,88 @@
+@*
+    A single editable note within a device panel. Edits are buffered locally and committed via OnSave,
+    which the parent routes through the device's sync engine (an instant, offline-capable local write).
+*@
+<div class="note-card @(Note.Deleted ? "deleted" : null) @(IsDirty ? "dirty" : null)">
+    <div class="note-card-top">
+        <span class="cat-pill">@Note.Category</span>
+        @if (IsDirty)
+        {
+            <span class="pending-pill" title="Local change not yet pushed">● pending</span>
+        }
+        <HlcBadge Timestamp="Note.UpdatedAt" />
+    </div>
+
+    <input class="note-title" placeholder="Title" @bind="_title" @bind:event="oninput" disabled="@Note.Deleted" />
+    <textarea class="note-body" rows="2" placeholder="Body" @bind="_body" @bind:event="oninput" disabled="@Note.Deleted"></textarea>
+
+    <div class="note-card-actions">
+        <select class="cat-select" @bind="_category" disabled="@Note.Deleted">
+            @foreach (var c in Categories)
+            {
+                <option value="@c">@c</option>
+            }
+        </select>
+        <span class="spacer"></span>
+        @if (!Note.Deleted)
+        {
+            <button class="btn-mini primary" disabled="@(!HasChanges)" @onclick="SaveAsync">Save</button>
+            <button class="btn-mini danger" @onclick="DeleteAsync">Delete</button>
+        }
+        else
+        {
+            <span class="deleted-tag">soft-deleted</span>
+        }
+    </div>
+</div>
+
+@code {
+    private static readonly string[] Categories = { "General", "Work", "Personal", "Ideas", "Urgent" };
+
+    private string _title = string.Empty;
+    private string _body = string.Empty;
+    private string _category = "General";
+    private HlcTimestamp _lastSeen;
+
+    /// <summary>The note to display and edit.</summary>
+    [Parameter, EditorRequired]
+    public DemoNote Note { get; set; } = default!;
+
+    /// <summary>Whether the note has an unpushed local change.</summary>
+    [Parameter]
+    public bool IsDirty { get; set; }
+
+    /// <summary>Invoked with the edited note when the user saves.</summary>
+    [Parameter]
+    public EventCallback<DemoNote> OnSave { get; set; }
+
+    /// <summary>Invoked with the note when the user deletes it.</summary>
+    [Parameter]
+    public EventCallback<DemoNote> OnDelete { get; set; }
+
+    private bool HasChanges =>
+        _title != Note.Title || _body != Note.Body || _category != Note.Category;
+
+    protected override void OnParametersSet()
+    {
+        // Refresh the edit buffer when the underlying note changes (e.g. a sync pulled a new version),
+        // but leave in-progress edits alone otherwise.
+        if (_lastSeen != Note.UpdatedAt)
+        {
+            _lastSeen = Note.UpdatedAt;
+            _title = Note.Title;
+            _body = Note.Body;
+            _category = Note.Category;
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        var edited = Note.Clone();
+        edited.Title = _title;
+        edited.Body = _body;
+        edited.Category = _category;
+        await OnSave.InvokeAsync(edited);
+    }
+
+    private Task DeleteAsync() => OnDelete.InvokeAsync(Note);
+}

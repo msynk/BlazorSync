@@ -1,0 +1,14 @@
+@*
+    Renders a Hybrid Logical Clock timestamp as a small badge, colour-coded by the originating node.
+*@
+<span class="hlc-badge" style="border-color:@(DisplayHelpers.ColorFor(Timestamp.Node))"
+      title="@Timestamp.Encode()">
+    <span class="hlc-dot" style="background:@(DisplayHelpers.ColorFor(Timestamp.Node))"></span>
+    @DisplayHelpers.FormatHlc(Timestamp)
+</span>
+
+@code {
+    /// <summary>The timestamp to render.</summary>
+    [Parameter, EditorRequired]
+    public HlcTimestamp Timestamp { get; set; }
+}

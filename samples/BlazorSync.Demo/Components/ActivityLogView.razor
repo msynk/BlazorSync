@@ -1,0 +1,38 @@
+@implements IDisposable
+@*
+    A live, scrolling feed of everything happening across the workspace: local edits, syncs,
+    conflicts and connectivity changes.
+*@
+<div class="activity">
+    <div class="activity-head">
+        <span class="activity-title">Activity</span>
+        <button class="btn-mini" @onclick="() => Log.Clear()">Clear</button>
+    </div>
+    <div class="activity-feed">
+        @if (Log.Entries.Count == 0)
+        {
+            <div class="empty">No activity yet.</div>
+        }
+        @foreach (var entry in Log.Entries)
+        {
+            <div class="activity-row kind-@entry.Kind.ToString().ToLowerInvariant()">
+                <span class="activity-time">@entry.Time.ToString("HH:mm:ss")</span>
+                <span class="activity-kind">@entry.Kind</span>
+                <span class="activity-source">@entry.Source</span>
+                <span class="activity-msg">@entry.Message</span>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    /// <summary>The activity log to render.</summary>
+    [Parameter, EditorRequired]
+    public ActivityLog Log { get; set; } = default!;
+
+    protected override void OnInitialized() => Log.Changed += OnChanged;
+
+    public void Dispose() => Log.Changed -= OnChanged;
+
+    private async void OnChanged() => await InvokeAsync(StateHasChanged);
+}

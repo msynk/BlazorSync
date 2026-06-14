@@ -1,0 +1,175 @@
+@implements IDisposable
+@*
+    Renders one simulated device: its connection state, conflict strategy, sync control and its local
+    notes. Local edits are instant; the Sync button is what talks to the shared cloud.
+*@
+<div class="device-panel" style="--accent:@DisplayHelpers.ColorFor(Device.NodeId)">
+    <header class="device-head">
+        <div class="device-id">
+            <span class="device-dot"></span>
+            <div>
+                <div class="device-name">@Device.Name</div>
+                <div class="device-node">@DisplayHelpers.ShortNode(Device.NodeId)</div>
+            </div>
+        </div>
+        <label class="online-toggle" title="Toggle network connectivity">
+            <input type="checkbox" checked="@Device.IsOnline" @onchange="ToggleOnline" />
+            <span class="@(Device.IsOnline ? "on" : "off")">@(Device.IsOnline ? "Online" : "Offline")</span>
+        </label>
+    </header>
+
+    <div class="device-controls">
+        <select class="strategy-select" title="Conflict resolution strategy"
+                @onchange="OnStrategyChanged">
+            @foreach (var s in Enum.GetValues<ConflictStrategy>())
+            {
+                <option value="@s" selected="@(s == Device.Strategy)">@StrategyLabel(s)</option>
+            }
+        </select>
+        <button class="btn sync @(Device.PendingCount > 0 ? "has-pending" : null)"
+                disabled="@_busy" @onclick="SyncAsync">
+            @if (_busy)
+            {
+                <span>Syncing…</span>
+            }
+            else
+            {
+                <span>⟲ Sync</span>
+                @if (Device.PendingCount > 0)
+                {
+                    <span class="pending-count">@Device.PendingCount</span>
+                }
+            }
+        </button>
+    </div>
+
+    <div class="device-status">@Device.Status</div>
+
+    <div class="note-list">
+        @if (_views.Count == 0)
+        {
+            <div class="empty">No notes yet. Add one below — it saves locally and instantly.</div>
+        }
+        @foreach (var view in _views)
+        {
+            <NoteCard Note="view.Note" IsDirty="view.IsDirty"
+                      OnSave="SaveNoteAsync" OnDelete="DeleteNoteAsync" />
+        }
+    </div>
+
+    <div class="add-note">
+        <input class="add-title" placeholder="New note title…" @bind="_newTitle" @onkeydown="OnNewKeyDown" />
+        <button class="btn-mini primary" disabled="@string.IsNullOrWhiteSpace(_newTitle)" @onclick="AddNoteAsync">+ Add</button>
+    </div>
+
+    <footer class="device-foot">
+        <label class="show-deleted">
+            <input type="checkbox" checked="@_showDeleted" @onchange="ToggleShowDeleted" /> show deleted
+        </label>
+    </footer>
+</div>
+
+@code {
+    private IReadOnlyList<NoteView> _views = Array.Empty<NoteView>();
+    private string _newTitle = string.Empty;
+    private bool _showDeleted;
+    private bool _busy;
+
+    /// <summary>The device this panel renders.</summary>
+    [Parameter, EditorRequired]
+    public DeviceContext Device { get; set; } = default!;
+
+    /// <summary>The shared workspace, used to broadcast changes to sibling panels.</summary>
+    [Parameter, EditorRequired]
+    public DemoWorkspace Workspace { get; set; } = default!;
+
+    protected override void OnInitialized() => Workspace.Changed += OnWorkspaceChanged;
+
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    public void Dispose() => Workspace.Changed -= OnWorkspaceChanged;
+
+    private async void OnWorkspaceChanged()
+    {
+        await ReloadAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task ReloadAsync() => _views = await Device.GetViewsAsync(_showDeleted);
+
+    private async Task ToggleOnline(ChangeEventArgs e)
+    {
+        Device.IsOnline = (bool)e.Value!;
+        Workspace.NotifyChanged();
+    }
+
+    private void OnStrategyChanged(ChangeEventArgs e)
+    {
+        if (Enum.TryParse<ConflictStrategy>((string?)e.Value, out var strategy))
+        {
+            Device.Strategy = strategy;
+        }
+    }
+
+    private async Task ToggleShowDeleted(ChangeEventArgs e)
+    {
+        _showDeleted = (bool)e.Value!;
+        await ReloadAsync();
+    }
+
+    private async Task AddNoteAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_newTitle))
+        {
+            return;
+        }
+
+        await Device.CreateNoteAsync(_newTitle.Trim(), string.Empty, "General");
+        _newTitle = string.Empty;
+        Workspace.NotifyChanged();
+    }
+
+    private async Task OnNewKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            await AddNoteAsync();
+        }
+    }
+
+    private async Task SaveNoteAsync(DemoNote note)
+    {
+        await Device.UpdateNoteAsync(note);
+        Workspace.NotifyChanged();
+    }
+
+    private async Task DeleteNoteAsync(DemoNote note)
+    {
+        await Device.DeleteNoteAsync(note);
+        Workspace.NotifyChanged();
+    }
+
+    private async Task SyncAsync()
+    {
+        _busy = true;
+        try
+        {
+            await Device.SyncAsync();
+        }
+        finally
+        {
+            _busy = false;
+        }
+
+        Workspace.NotifyChanged();
+    }
+
+    private static string StrategyLabel(ConflictStrategy s) => s switch
+    {
+        ConflictStrategy.ClientWins => "Client wins (default)",
+        ConflictStrategy.ServerWins => "Server wins",
+        ConflictStrategy.LastWriteWins => "Last write wins",
+        ConflictStrategy.FieldMerge => "Field merge (custom)",
+        _ => s.ToString(),
+    };
+}

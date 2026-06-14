@@ -1,0 +1,64 @@
+@implements IDisposable
+@*
+    Shows the authoritative state held by the shared in-process cloud server, including soft-deleted
+    rows (which are retained so deletions can replicate). Updates whenever the workspace changes.
+*@
+<div class="inspector">
+    <div class="inspector-head">
+        <span class="cloud-mark">☁️</span>
+        <div>
+            <div class="inspector-title">Cloud (authoritative master)</div>
+            <div class="inspector-sub">@_rows.Count record(s) · @_rows.Count(r => r.Deleted) deleted</div>
+        </div>
+    </div>
+
+    @if (_rows.Count == 0)
+    {
+        <div class="empty">The server has no records yet. Create a note and sync a device.</div>
+    }
+    else
+    {
+        <table class="master-table">
+            <thead>
+                <tr><th>Title</th><th>Category</th><th>Server timestamp</th></tr>
+            </thead>
+            <tbody>
+                @foreach (var row in _rows)
+                {
+                    <tr class="@(row.Deleted ? "deleted" : null)">
+                        <td>@(string.IsNullOrEmpty(row.Title) ? "(untitled)" : row.Title)</td>
+                        <td><span class="cat-pill">@row.Category</span></td>
+                        <td><HlcBadge Timestamp="row.UpdatedAt" /></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+</div>
+
+@code {
+    private IReadOnlyList<DemoNote> _rows = Array.Empty<DemoNote>();
+
+    /// <summary>The shared workspace.</summary>
+    [Parameter, EditorRequired]
+    public DemoWorkspace Workspace { get; set; } = default!;
+
+    protected override void OnInitialized()
+    {
+        Workspace.Changed += OnChanged;
+        Reload();
+    }
+
+    public void Dispose() => Workspace.Changed -= OnChanged;
+
+    private async void OnChanged()
+    {
+        Reload();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private void Reload() =>
+        _rows = Workspace.Server.Snapshot(includeDeleted: true)
+            .OrderByDescending(n => n.UpdatedAt)
+            .ToList();
+}
