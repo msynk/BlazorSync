@@ -16,9 +16,9 @@ BlazorSync implements an RxDB-style replication protocol in C#. All of the proto
 
 ```
 BlazorSync.slnx
-├── src/BlazorSync.Core            The protocol library (engine, clock, conflicts, storage/transport contracts)
+├── src/BlazorSync            The protocol library (engine, clock, conflicts, storage/transport contracts)
 ├── samples/BlazorSync.Demo        Blazor WebAssembly multi-device playground
-└── tests/BlazorSync.Core.Tests    xUnit tests for the clock, conflicts, and sync engine
+└── tests/BlazorSync.Tests    xUnit tests for the clock, conflicts, and sync engine
 ```
 
 ## How it works
@@ -50,7 +50,7 @@ public interface ISyncEntity
 
 ### Conflict handlers
 
-The engine ships with several built-in strategies (all in `BlazorSync.Core.Conflicts`):
+The engine ships with several built-in strategies (all in `BlazorSync.Conflicts`):
 
 | Handler | Behavior |
 | --- | --- |
@@ -66,11 +66,11 @@ A handler receives the `RealMaster` (server state), the `AssumedMaster` (what th
 Reference the core project and wire up an engine. The example below uses the included in-memory store and in-process server, which is also how the test suite runs.
 
 ```csharp
-using BlazorSync.Core;
-using BlazorSync.Core.Clocks;
-using BlazorSync.Core.Conflicts;
-using BlazorSync.Core.Server;
-using BlazorSync.Core.Storage;
+using BlazorSync;
+using BlazorSync.Clocks;
+using BlazorSync.Conflicts;
+using BlazorSync.Server;
+using BlazorSync.Storage;
 
 // 1. A node-unique clock (use a stable, persisted id per device/installation).
 var clock = new HybridLogicalClock(node: "device-a");
@@ -146,7 +146,7 @@ dotnet build
 dotnet test
 ```
 
-The test suite (`tests/BlazorSync.Core.Tests`) covers the Hybrid Logical Clock, the built-in conflict handlers, and end-to-end sync engine scenarios using a `ManualClock` for deterministic timestamps.
+The test suite (`tests/BlazorSync.Tests`) covers the Hybrid Logical Clock, the built-in conflict handlers, and end-to-end sync engine scenarios using a `ManualClock` for deterministic timestamps.
 
 ## Status
 

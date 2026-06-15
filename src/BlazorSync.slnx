@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/samples/">
+    <Project Path="BlazorSync.Demo/BlazorSync.Demo.csproj" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="BlazorSync/BlazorSync.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="BlazorSync.Tests/BlazorSync.Tests.csproj" />
+  </Folder>
+</Solution>
