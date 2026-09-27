@@ -1,3 +1,4 @@
+using BlazorSync.Clocks;
 using BlazorSync.Conflicts;
 using BlazorSync.Tests.TestSupport;
 using Xunit;
@@ -7,8 +8,13 @@ namespace BlazorSync.Tests;
 
 /// <summary>
 /// T60 / I20: seeded random schedules of local writes, deletes, partial syncs, lost responses and
-/// crashes before acknowledgement, followed by quiescence. Every replica must converge to the server
-/// state with nothing left dirty, and the server must never apply one operation id twice.
+/// crashes before acknowledgement, and edits made while a push is in flight, followed by quiescence.
+/// Every replica must converge to the server state with nothing left dirty, the server must never apply
+/// one operation id twice, and the result must match a reference model of the policy:
+/// <list type="bullet">
+/// <item><description>last-write-wins ends on the write with the greatest authoring timestamp;</description></item>
+/// <item><description>server-wins and last-write-wins never invent timestamps nobody wrote.</description></item>
+/// </list>
 /// Failing seeds are reproducible from the test name.
 /// </summary>
 public sealed class RandomizedConvergenceTests(ITestOutputHelper output)
@@ -35,8 +41,21 @@ public sealed class RandomizedConvergenceTests(ITestOutputHelper output)
         var world = new ManualClock(1_000_000);
         var server = InMemorySyncServerRef.Create(world);
         var replicas = Enumerable.Range(0, 3)
-            .Select(i => new TestReplica(server, $"r{i}", Handler(policy), new SyncOptions<Note> { PushBatchSize = 2, PullBatchSize = 3 }, new SkewedClock(world, random.Next(-50, 50))))
+            .Select(i => new TestReplica(
+                server,
+                $"r{i}",
+                Handler(policy),
+                new SyncOptions<Note> { PushBatchSize = random.Next(1, 5), PullBatchSize = random.Next(1, 6) },
+                new SkewedClock(world, random.Next(-50, 50))))
             .ToList();
+        var written = new Dictionary<string, List<HlcTimestamp>>(StringComparer.Ordinal);
+        void Record(LocalWriteReceipt? receipt)
+        {
+            if (receipt is { } r)
+            {
+                (written.TryGetValue(r.Id, out var list) ? list : written[r.Id] = []).Add(r.UpdatedAt);
+            }
+        }
         var ids = Enumerable.Range(0, 6).Select(i => $"doc{i}").ToArray();
 
         for (var step = 0; step < 250; step++)
@@ -48,11 +67,22 @@ public sealed class RandomizedConvergenceTests(ITestOutputHelper output)
             {
                 switch (random.Next(10))
                 {
-                    case 0 or 1 or 2:
-                        await replica.Engine.WriteAsync(new Note { Id = id, Title = $"s{seed}-{step}" });
+                    case 0 or 1:
+                        Record(await replica.Engine.WriteAsync(new Note { Id = id, Title = $"s{seed}-{step}" }));
+                        break;
+                    case 2:
+                        // A local edit lands while the push is waiting for its response.
+                        var inFlightId = ids[random.Next(ids.Length)];
+                        replica.Transport.AfterPush = async result =>
+                        {
+                            replica.Transport.AfterPush = null;
+                            Record(await replica.Engine.WriteAsync(new Note { Id = inFlightId, Title = $"s{seed}-{step}-flight" }));
+                            return result;
+                        };
+                        await replica.Engine.PushAsync();
                         break;
                     case 3:
-                        await replica.Engine.DeleteAsync(id);
+                        Record(await replica.Engine.DeleteAsync(id));
                         break;
                     case 4:
                         replica.Transport.LoseResponses = 1;
@@ -83,13 +113,14 @@ public sealed class RandomizedConvergenceTests(ITestOutputHelper output)
             {
                 replica.Store.BeforeUpdate = null;
                 replica.Transport.LoseResponses = 0;
+                replica.Transport.AfterPush = null;
             }
         }
 
         // Quiescence: no new writes, reliable network, sync until every replica reports completion twice.
         for (var round = 0; ; round++)
         {
-            Assert.True(round < 20, $"seed {seed} did not quiesce");
+            Assert.True(round < 20, $"seed {seed} {policy} did not quiesce");
             var results = new List<SyncResult>();
             foreach (var replica in replicas)
             {
@@ -113,6 +144,21 @@ public sealed class RandomizedConvergenceTests(ITestOutputHelper output)
             Assert.Equal(0, await replica.Engine.CountDirtyAsync());
             var actual = (await replica.Engine.QueryAsync(includeDeleted: true)).ToDictionary(n => n.Id, Describe);
             Assert.Equal(expected, actual);
+        }
+
+        var final = server.Server.Snapshot().ToDictionary(n => n.Id, StringComparer.Ordinal);
+        Assert.Equal(written.Keys.Order(StringComparer.Ordinal), final.Keys.Order(StringComparer.Ordinal));
+        foreach (var (id, stamps) in written)
+        {
+            if (policy == "lww")
+            {
+                Assert.True(final[id].UpdatedAt == stamps.Max(), $"seed {seed}: {id} ended at {final[id].UpdatedAt}, latest write was {stamps.Max()}");
+            }
+
+            if (policy is "lww" or "server-wins")
+            {
+                Assert.True(stamps.Contains(final[id].UpdatedAt), $"seed {seed}: {id} ended on a timestamp nobody wrote");
+            }
         }
 
         var sent = replicas.SelectMany(r => r.Transport.PushLog).SelectMany(p => p.Operations).Select(o => o.OperationId).Distinct().Count();

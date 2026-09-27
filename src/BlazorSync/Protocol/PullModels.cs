@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace BlazorSync.Protocol;
 
 /// <summary>
@@ -6,7 +8,9 @@ namespace BlazorSync.Protocol;
 /// </summary>
 /// <param name="Since">The client's stored checkpoint. <see cref="Checkpoint.Start"/> for a full sync.</param>
 /// <param name="BatchSize">The maximum number of changes the server may return (at least 1).</param>
-public readonly record struct PullRequest(Checkpoint Since, int BatchSize);
+public readonly record struct PullRequest(
+    [property: JsonPropertyName("checkpoint"), JsonRequired] Checkpoint Since,
+    [property: JsonPropertyName("limit"), JsonRequired] int BatchSize);
 
 /// <summary>A committed server state of one document, as delivered by the change feed.</summary>
 /// <typeparam name="TDocument">The synchronized entity type.</typeparam>
@@ -18,7 +22,9 @@ public readonly record struct PullRequest(Checkpoint Since, int BatchSize);
 /// The server's version of the document: the concurrency token a later push must name as its base.
 /// Versions of one document strictly increase.
 /// </param>
-public sealed record RemoteChange<TDocument>(TDocument Document, long Version)
+public sealed record RemoteChange<TDocument>(
+    [property: JsonPropertyName("document"), JsonRequired] TDocument Document,
+    [property: JsonPropertyName("version"), JsonRequired, JsonConverter(typeof(WireInt64JsonConverter))] long Version)
     where TDocument : class, ISyncEntity;
 
 /// <summary>One page of the change feed.</summary>
@@ -36,7 +42,7 @@ public sealed record RemoteChange<TDocument>(TDocument Document, long Version)
 /// <paramref name="HasMore"/> set must advance the checkpoint.
 /// </param>
 public sealed record PullResult<TDocument>(
-    IReadOnlyList<RemoteChange<TDocument>> Changes,
-    Checkpoint Checkpoint,
-    bool HasMore)
+    [property: JsonPropertyName("changes"), JsonRequired] IReadOnlyList<RemoteChange<TDocument>> Changes,
+    [property: JsonPropertyName("checkpoint"), JsonRequired] Checkpoint Checkpoint,
+    [property: JsonPropertyName("hasMore"), JsonRequired] bool HasMore)
     where TDocument : class, ISyncEntity;

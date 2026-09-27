@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace BlazorSync;
 
 /// <summary>
@@ -10,6 +12,7 @@ namespace BlazorSync;
 /// meaningful to the server and scope that issued it.
 /// </remarks>
 /// <param name="Value">The opaque token, or <see langword="null"/> for <see cref="Start"/>.</param>
+[JsonConverter(typeof(Protocol.CheckpointJsonConverter))]
 public readonly record struct Checkpoint(string? Value)
 {
     /// <summary>The position before the first change (a full sync).</summary>

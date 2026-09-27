@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using BlazorSync.Clocks;
 using BlazorSync.Conflicts;
 using BlazorSync.Documents;
@@ -52,7 +53,10 @@ public sealed class SyncEngine<TDocument>
     private readonly object _initGate = new();
     private Task? _initialization;
 
-    /// <summary>Creates an engine for one collection.</summary>
+    /// <summary>
+    /// Creates an engine for one collection that clones documents with reflection-based JSON. Not
+    /// trim/AOT safe; use the overload that takes a cloner in trimmed or AOT-compiled apps.
+    /// </summary>
     /// <param name="store">The local persistence layer.</param>
     /// <param name="transport">The client-side view of the server.</param>
     /// <param name="clock">
@@ -64,17 +68,41 @@ public sealed class SyncEngine<TDocument>
     /// </param>
     /// <param name="options">Optional tuning; sensible defaults are used when omitted.</param>
     /// <exception cref="ArgumentOutOfRangeException">An option is out of range.</exception>
-#pragma warning disable IL2026, IL3050 // Default JSON cloner is reflection-based; callers targeting AOT/trimming supply options.Cloner.
+    [RequiresUnreferencedCode("Clones documents with reflection-based JSON. Use the constructor that takes a cloner for trimmed or AOT targets.")]
+    [RequiresDynamicCode("Clones documents with reflection-based JSON. Use the constructor that takes a cloner for trimmed or AOT targets.")]
     public SyncEngine(
         ILocalStore<TDocument> store,
         ISyncTransport<TDocument> transport,
         HybridLogicalClock clock,
         IConflictHandler<TDocument>? conflictHandler = null,
         SyncOptions<TDocument>? options = null)
+        : this(store, transport, clock, static doc => DocumentCloner.JsonClone(doc), conflictHandler, options)
+    {
+    }
+
+    /// <summary>Creates an engine for one collection with an explicit, trim/AOT-safe cloner.</summary>
+    /// <param name="store">The local persistence layer.</param>
+    /// <param name="transport">The client-side view of the server.</param>
+    /// <param name="clock">The Hybrid Logical Clock used to stamp local writes.</param>
+    /// <param name="cloner">
+    /// Returns a deep, independent copy of a document, for example <c>doc =&gt; doc.Clone()</c> or
+    /// <see cref="DocumentCloner.Json{T}"/> with source-generated metadata.
+    /// </param>
+    /// <param name="conflictHandler">The conflict strategy. Defaults to client-wins.</param>
+    /// <param name="options">Optional tuning; sensible defaults are used when omitted.</param>
+    /// <exception cref="ArgumentOutOfRangeException">An option is out of range.</exception>
+    public SyncEngine(
+        ILocalStore<TDocument> store,
+        ISyncTransport<TDocument> transport,
+        HybridLogicalClock clock,
+        Func<TDocument, TDocument> cloner,
+        IConflictHandler<TDocument>? conflictHandler = null,
+        SyncOptions<TDocument>? options = null)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(transport);
         ArgumentNullException.ThrowIfNull(clock);
+        ArgumentNullException.ThrowIfNull(cloner);
 
         _options = options ?? new SyncOptions<TDocument>();
         _options.Validate();
@@ -82,9 +110,8 @@ public sealed class SyncEngine<TDocument>
         _transport = transport;
         _clock = clock;
         _conflictHandler = conflictHandler ?? new ClientWinsConflictHandler<TDocument>();
-        _clone = _options.Cloner ?? (static doc => DocumentCloner.JsonClone(doc));
+        _clone = cloner;
     }
-#pragma warning restore IL2026, IL3050
 
     /// <summary>Returns the app-visible documents in the local store.</summary>
     public Task<IReadOnlyList<TDocument>> QueryAsync(bool includeDeleted = false, CancellationToken cancellationToken = default) =>

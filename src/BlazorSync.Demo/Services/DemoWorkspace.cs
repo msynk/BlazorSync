@@ -84,9 +84,7 @@ public sealed class DemoWorkspace
     {
         _devices.Clear();
         _deviceCounter = 0;
-        _server = new InMemorySyncServer<DemoNote>(
-            new InMemorySyncServerOptions<DemoNote> { Cloner = static n => n.Clone(), Fingerprint = DemoJsonContext.Fingerprint },
-            "cloud");
+        _server = CreateServer();
         Log.Clear();
         Log.Add(ActivityKind.System, "workspace", "reset — fresh cloud and two devices");
 
@@ -94,6 +92,10 @@ public sealed class DemoWorkspace
         AddDeviceQuiet();
         NotifyChanged();
     }
+
+    /// <summary>Creates an in-process cloud server with trim/AOT-safe cloning and fingerprinting.</summary>
+    public static InMemorySyncServer<DemoNote> CreateServer() =>
+        new(new InMemorySyncServerOptions<DemoNote> { Cloner = static n => n.Clone(), Fingerprint = DemoJsonContext.Fingerprint }, "cloud");
 
     /// <summary>Notifies subscribers to re-render.</summary>
     public void NotifyChanged() => Changed?.Invoke();

@@ -1,0 +1,1 @@
+{ "operations": [ { "operationId": "op1", "documentId": "n1", "document": { "id": "n1", "updatedAt": "001790000000000:000000:a", "deleted": false, "title": null, "amount": 0, "due": null, "tags": [] } } ] }

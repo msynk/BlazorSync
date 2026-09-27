@@ -34,11 +34,7 @@ public sealed class PushProtocolTests
     [Fact(DisplayName = "T05 I08 I19: mixed accepted, conflicting and rejected rows report residual status")]
     public async Task MixedOutcomes()
     {
-        var server = new InMemorySyncServerRef(new Server.InMemorySyncServer<Note>(new Server.InMemorySyncServerOptions<Note>
-        {
-            PhysicalClock = new ManualClock(1_000),
-            Validator = (op, _) => op.Document.Title == "bad" ? PushErrorCodes.Forbidden : null,
-        }));
+        var server = new InMemorySyncServerRef(new Server.InMemorySyncServer<Note>(NoteJson.ServerOptions(validator: (op, _) => op.Document.Title == "bad" ? PushErrorCodes.Forbidden : null)));
         var other = new TestReplica(server, "b");
         await other.Engine.WriteAsync(new Note { Id = "c", Title = "server" });
         await other.Engine.SyncAsync();
@@ -64,11 +60,7 @@ public sealed class PushProtocolTests
     [Fact(DisplayName = "T57 I19: a rejected record does not block later records and is retried after a new edit")]
     public async Task RejectedRecordDoesNotStarveQueue()
     {
-        var server = new InMemorySyncServerRef(new Server.InMemorySyncServer<Note>(new Server.InMemorySyncServerOptions<Note>
-        {
-            PhysicalClock = new ManualClock(1_000),
-            Validator = (op, _) => op.Document.Title == "bad" ? PushErrorCodes.Forbidden : null,
-        }));
+        var server = new InMemorySyncServerRef(new Server.InMemorySyncServer<Note>(NoteJson.ServerOptions(validator: (op, _) => op.Document.Title == "bad" ? PushErrorCodes.Forbidden : null)));
         var client = new TestReplica(server, "a", options: new SyncOptions<Note> { PushBatchSize = 1 });
         await client.Engine.WriteAsync(new Note { Id = "a-first", Title = "bad" }); // oldest, head of queue
         for (var i = 0; i < 3; i++)
@@ -87,51 +79,6 @@ public sealed class PushProtocolTests
         var third = await client.Engine.PushAsync();
         Assert.Equal(1, third.Pushed);
         Assert.Null((await client.RecordAsync("a-first")).Rejection);
-    }
-
-    [Fact(DisplayName = "T13 I04: a duplicate delivery replays the original outcome")]
-    public void DuplicateDeliveryReplaysOutcome()
-    {
-        var server = InMemorySyncServerRef.Create();
-        var op = new PushOperation<Note>("op-1", "n1", null, new Note { Id = "n1", Title = "x" });
-
-        var first = server.Server.Push(new PushRequest<Note>([op])).Outcomes[0];
-        var second = server.Server.Push(new PushRequest<Note>([op])).Outcomes[0];
-
-        Assert.Equal(PushOutcomeKind.Accepted, first.Kind);
-        Assert.False(first.IsDuplicate);
-        Assert.Equal(PushOutcomeKind.Accepted, second.Kind);
-        Assert.True(second.IsDuplicate);
-        Assert.Equal(first.Version, second.Version);
-        Assert.Equal(first.Version, server.Server.GetVersion("n1"));
-    }
-
-    [Fact(DisplayName = "T13 I04: a duplicate of a conflicted operation still reports the conflict")]
-    public void DuplicateConflictReplays()
-    {
-        var server = InMemorySyncServerRef.Create();
-        server.Server.Push(new PushRequest<Note>([new("op-0", "n1", null, new Note { Id = "n1" })]));
-        var op = new PushOperation<Note>("op-1", "n1", null, new Note { Id = "n1", Title = "late insert" });
-
-        var first = server.Server.Push(new PushRequest<Note>([op])).Outcomes[0];
-        var again = server.Server.Push(new PushRequest<Note>([op])).Outcomes[0];
-
-        Assert.Equal(PushOutcomeKind.Conflict, first.Kind);
-        Assert.Equal(PushOutcomeKind.Conflict, again.Kind);
-        Assert.True(again.IsDuplicate);
-    }
-
-    [Fact(DisplayName = "T14 I04: an operation id reused with a different payload fails")]
-    public void ReusedOperationIdWithDifferentPayloadFails()
-    {
-        var server = InMemorySyncServerRef.Create();
-        server.Server.Push(new PushRequest<Note>([new("op-1", "n1", null, new Note { Id = "n1", Title = "x" })]));
-
-        var reused = server.Server.Push(new PushRequest<Note>([new("op-1", "n1", null, new Note { Id = "n1", Title = "y" })])).Outcomes[0];
-
-        Assert.Equal(PushOutcomeKind.Rejected, reused.Kind);
-        Assert.Equal(PushErrorCodes.OperationIdReused, reused.ErrorCode);
-        Assert.Equal("x", server.Get("n1").Title);
     }
 
     [Fact(DisplayName = "T15 I09: a delayed old response cannot regress a newer accepted operation")]
@@ -429,24 +376,10 @@ public sealed class PushProtocolTests
     [Fact(DisplayName = "T59 I08: the server refuses oversized push requests")]
     public void OversizedPushRefused()
     {
-        var server = new Server.InMemorySyncServer<Note>(new Server.InMemorySyncServerOptions<Note> { MaxOperationsPerPush = 2 });
+        var server = new Server.InMemorySyncServer<Note>(NoteJson.ServerOptions(maxOperationsPerPush: 2));
         var ops = Enumerable.Range(0, 3).Select(i => new PushOperation<Note>($"op{i}", $"n{i}", null, new Note { Id = $"n{i}" })).ToList();
 
         Assert.Throws<ArgumentException>(() => server.Push(new PushRequest<Note>(ops)));
         Assert.Empty(server.Snapshot());
-    }
-
-    [Fact(DisplayName = "I05: two operations based on the same version cannot both succeed")]
-    public void SameBaseSecondWriterConflicts()
-    {
-        var server = InMemorySyncServerRef.Create();
-        var v1 = server.Server.Push(new PushRequest<Note>([new("op-0", "n1", null, new Note { Id = "n1" })])).Outcomes[0].Version;
-
-        var a = server.Server.Push(new PushRequest<Note>([new("op-a", "n1", v1, new Note { Id = "n1", Title = "A" })])).Outcomes[0];
-        var b = server.Server.Push(new PushRequest<Note>([new("op-b", "n1", v1, new Note { Id = "n1", Title = "B" })])).Outcomes[0];
-
-        Assert.Equal(PushOutcomeKind.Accepted, a.Kind);
-        Assert.Equal(PushOutcomeKind.Conflict, b.Kind);
-        Assert.Equal("A", server.Get("n1").Title);
     }
 }

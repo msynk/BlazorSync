@@ -31,12 +31,6 @@ public sealed class SyncOptions<TDocument>
     /// </summary>
     public int MaxConflictRetries { get; init; } = 3;
 
-    /// <summary>
-    /// Deep-clone function used to keep current, base and pending states isolated. Defaults to a JSON
-    /// round-trip; supply a source-generated or hand-written cloner for trimmed/AOT (WASM) builds.
-    /// </summary>
-    public Func<TDocument, TDocument>? Cloner { get; init; }
-
     /// <summary>Throws <see cref="ArgumentOutOfRangeException"/> if any value is out of range.</summary>
     public void Validate()
     {

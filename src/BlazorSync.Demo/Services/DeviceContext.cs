@@ -33,8 +33,8 @@ public sealed class DeviceContext
             store,
             Connection,
             clock,
-            _conflictHandler,
-            new SyncOptions<DemoNote> { Cloner = static n => n.Clone() });
+            static n => n.Clone(),
+            _conflictHandler);
     }
 
     /// <summary>The device's display name.</summary>

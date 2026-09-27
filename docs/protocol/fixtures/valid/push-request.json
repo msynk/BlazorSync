@@ -1,0 +1,32 @@
+{
+  "operations": [
+    {
+      "operationId": "0192f0a1b2c37d4e8f9a0b1c2d3e4f50",
+      "documentId": "ノート-😀",
+      "baseVersion": null,
+      "document": {
+        "id": "ノート-😀",
+        "updatedAt": "001790000000000:000000:device-a",
+        "deleted": false,
+        "title": "Grüße",
+        "amount": 12345678901234567.89,
+        "due": "2026-09-27T10:15:00+02:00",
+        "tags": ["a", "b"]
+      }
+    },
+    {
+      "operationId": "0192f0a1b2c37d4e8f9a0b1c2d3e4f51",
+      "documentId": "n2",
+      "baseVersion": "9007199254740993",
+      "document": {
+        "id": "n2",
+        "updatedAt": "001790000000001:000003:device-a",
+        "deleted": true,
+        "title": null,
+        "amount": 0,
+        "due": null,
+        "tags": []
+      }
+    }
+  ]
+}

@@ -18,6 +18,7 @@ namespace BlazorSync.Clocks;
 /// authored. It is not the server's concurrency token or the pull cursor; those are the server
 /// document version and the opaque <see cref="Checkpoint"/> respectively.
 /// </remarks>
+[JsonConverter(typeof(Protocol.HlcTimestampJsonConverter))]
 public readonly record struct HlcTimestamp : IComparable<HlcTimestamp>
 {
     /// <summary>The largest valid <see cref="WallTime"/> (15 decimal digits, about year 33658).</summary>
@@ -43,7 +44,6 @@ public readonly record struct HlcTimestamp : IComparable<HlcTimestamp>
     /// </param>
     /// <exception cref="ArgumentOutOfRangeException">A numeric field is out of range.</exception>
     /// <exception cref="ArgumentException"><paramref name="node"/> is invalid.</exception>
-    [JsonConstructor]
     public HlcTimestamp(long wallTime, int counter, string node)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(wallTime);

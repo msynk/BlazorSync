@@ -9,9 +9,10 @@ Last updated: 2026-09-27, Windows 10 x64, .NET SDK 10.0.401, `wasm-tools` 10.0.1
 
 | Component | Tier | Evidence |
 |---|---|---|
-| Core engine, HLC, conflict handlers (`BlazorSync`) | Verified (in-process) | 152 unit, regression, fault-injection and seeded randomized tests (`dotnet test src/BlazorSync.slnx -c Release`). |
-| `InMemoryLocalStore` | Verified (in-process), **not durable** | Same suite. Loses all data when the process ends. |
-| `InMemorySyncServer` reference authority | Verified (in-process), **not durable, no auth** | Same suite. For tests and samples only. |
+| Core engine, HLC, conflict handlers (`BlazorSync`) | Verified (in-process) | 205 unit, regression, conformance, wire-fixture, fault-injection and seeded randomized tests (`dotnet test src/BlazorSync.slnx -c Release`). Library builds with `IsAotCompatible` and zero warnings. |
+| `InMemoryLocalStore` | Verified (in-process), **not durable** | Passes `LocalStoreConformanceTests`. Loses all data when the process ends. |
+| `InMemorySyncServer` reference authority | Verified (in-process), **not durable, no auth** | Passes `AuthorityConformanceTests` directly and through the JSON wire encoding. For tests and samples only. |
+| Wire JSON encoding (`docs/protocol/v1.md`) | Verified (fixtures) | 6 valid fixtures round-trip, 12 invalid fixtures refused, engine traffic converges through the encoding. No HTTP binding yet. |
 | `InProcessTransport` | Verified (in-process) | Same suite. |
 | Durable native store (SQLite) | Planned | Phase 3. |
 | Browser store (IndexedDB) | Planned | Phase 5. |

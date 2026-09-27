@@ -134,13 +134,15 @@ public sealed class TestReplica
         Conflicts.IConflictHandler<Note>? conflictHandler = null,
         SyncOptions<Note>? options = null,
         IPhysicalClock? physicalClock = null,
-        InMemoryLocalStore<Note>? store = null)
+        InMemoryLocalStore<Note>? store = null,
+        Func<ISyncTransport<Note>, ISyncTransport<Note>>? transport = null)
     {
         Physical = physicalClock ?? new ManualClock(1_000);
-        Store = new InterceptingStore<Note>(store ?? new InMemoryLocalStore<Note>());
-        Transport = new FaultyTransport<Note>(new Server.InProcessTransport<Note>(server.Server));
+        Store = new InterceptingStore<Note>(store ?? new InMemoryLocalStore<Note>(NoteJson.Clone));
+        ISyncTransport<Note> wire = new Server.InProcessTransport<Note>(server.Server);
+        Transport = new FaultyTransport<Note>(transport is null ? wire : transport(wire));
         Clock = new HybridLogicalClock(node, Physical);
-        Engine = new SyncEngine<Note>(Store, Transport, Clock, conflictHandler, options);
+        Engine = new SyncEngine<Note>(Store, Transport, Clock, NoteJson.Clone, conflictHandler, options);
     }
 
     public IPhysicalClock Physical { get; }
@@ -163,7 +165,37 @@ public sealed class InMemorySyncServerRef(Server.InMemorySyncServer<Note> server
     public Server.InMemorySyncServer<Note> Server { get; } = server;
 
     public static InMemorySyncServerRef Create(IPhysicalClock? clock = null) =>
-        new(new Server.InMemorySyncServer<Note>(new Server.InMemorySyncServerOptions<Note> { PhysicalClock = clock ?? new ManualClock(1_000) }));
+        new(new Server.InMemorySyncServer<Note>(NoteJson.ServerOptions(clock)));
 
     public Note Get(string id) => Server.Snapshot().Single(n => n.Id == id);
+}
+
+/// <summary>
+/// Serializes every request and response through the wire JSON encoding (source-generated metadata),
+/// so the engine only ever sees what a real network peer would have sent.
+/// </summary>
+public sealed class JsonWireTransport<T>(ISyncTransport<T> inner, System.Text.Json.Serialization.JsonSerializerContext context) : ISyncTransport<T>
+    where T : class, ISyncEntity
+{
+    public async Task<PullResult<T>> PullAsync(PullRequest request, CancellationToken cancellationToken = default)
+    {
+        var result = await inner.PullAsync(RoundTrip(request), cancellationToken);
+        return RoundTrip(result);
+    }
+
+    public async Task<PushResult<T>> PushAsync(PushRequest<T> request, CancellationToken cancellationToken = default)
+    {
+        var result = await inner.PushAsync(RoundTrip(request), cancellationToken);
+        return RoundTrip(result);
+    }
+
+    public IAsyncEnumerable<StreamEvent<T>> StreamAsync(Checkpoint since, CancellationToken cancellationToken = default) =>
+        inner.StreamAsync(since, cancellationToken);
+
+    private TValue RoundTrip<TValue>(TValue value)
+    {
+        var typeInfo = (System.Text.Json.Serialization.Metadata.JsonTypeInfo<TValue>)context.GetTypeInfo(typeof(TValue))!;
+        var bytes = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(value, typeInfo);
+        return System.Text.Json.JsonSerializer.Deserialize(bytes, typeInfo)!;
+    }
 }

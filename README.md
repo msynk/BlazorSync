@@ -34,7 +34,8 @@ execution for purely server-rendered UI, or schema migration yet.
 src/BlazorSync.slnx                 Solution
 src/BlazorSync/                     Protocol library (engine, clock, conflicts, storage/transport contracts,
                                     in-memory reference store and authority)
-src/BlazorSync.Tests/               xUnit tests: unit, regression, fault injection, seeded randomized convergence
+src/BlazorSync.Tests/               xUnit tests: unit, regression, provider conformance, wire fixtures,
+                                    fault injection, seeded randomized convergence
 src/BlazorSync.Demo/                Blazor WebAssembly playground simulating several devices in one tab
 docs/                               Baseline review, architecture decisions, invariants, roadmap, compatibility
 ```
@@ -147,20 +148,33 @@ public sealed class Note : ISyncEntity
 
 ## Trimming and AOT (Blazor WebAssembly)
 
-The engine, in-memory store and in-memory server default to reflection-based `System.Text.Json` for
-cloning (and, on the server, for operation fingerprints). That default is **not** trim/AOT-safe. For
-published WebAssembly builds supply explicit delegates, as the demo does:
+The library is marked `IsAotCompatible`. Constructors that fall back to reflection-based JSON
+(`SyncEngine` without a cloner, `new InMemoryLocalStore<T>()`, `new InMemorySyncServer<T>()`) are annotated
+with `[RequiresUnreferencedCode]`, so the trimming analyzer flags them. In trimmed or AOT builds use the
+overloads that take delegates, for example with source-generated JSON:
 
 ```csharp
-var options = new SyncOptions<DemoNote> { Cloner = doc => doc.Clone() };
-var engine = new SyncEngine<DemoNote>(store, transport, clock, options: options);
+[JsonSerializable(typeof(Note))]
+partial class AppJsonContext : JsonSerializerContext;
 
-var server = new InMemorySyncServer<DemoNote>(new InMemorySyncServerOptions<DemoNote>
+var clone = DocumentCloner.Json(AppJsonContext.Default.Note);   // or a hand-written n => n.Clone()
+var store = new InMemoryLocalStore<Note>(clone);
+var engine = new SyncEngine<Note>(store, transport, clock, clone);
+
+var server = new InMemorySyncServer<Note>(new InMemorySyncServerOptions<Note>
 {
-    Cloner = n => n.Clone(),
-    Fingerprint = DemoJsonContext.Fingerprint, // source-generated JSON
+    Cloner = clone,
+    Fingerprint = DocumentCloner.JsonFingerprint(AppJsonContext.Default.Note),
 });
 ```
+
+## Wire protocol
+
+The messages, JSON encoding (64-bit versions as digit strings, canonical HLC strings, opaque checkpoints)
+and the rules for authorities and replicas are specified in [docs/protocol/v1.md](docs/protocol/v1.md),
+with fixtures in `docs/protocol/fixtures`. Add the protocol types for your document to a
+`JsonSerializerContext` (`PullRequest`, `PullResult<T>`, `PushRequest<T>`, `PushResult<T>`). Give
+documents a `[JsonExtensionData]` member so fields unknown to older clients are not erased.
 
 ## Hybrid Logical Clock
 
@@ -203,6 +217,7 @@ dotnet test src/BlazorSync.slnx --filter "DisplayName~I04"
 
 - [Baseline review](docs/review/baseline.md): reproduced defects and what changed.
 - [Architecture decisions and invariants](docs/architecture/README.md).
+- [Protocol specification v1](docs/protocol/v1.md).
 - [Compatibility policy and migration notes](docs/compatibility.md).
 - [Support matrix](docs/support-matrix.md) and [roadmap](docs/roadmap.md).
 

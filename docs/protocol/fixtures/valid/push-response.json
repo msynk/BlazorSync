@@ -1,0 +1,58 @@
+{
+  "outcomes": [
+    {
+      "operationId": "0192f0a1b2c37d4e8f9a0b1c2d3e4f50",
+      "kind": "accepted",
+      "version": "9007199254740995",
+      "document": {
+        "id": "ノート-😀",
+        "updatedAt": "001790000000000:000000:device-a",
+        "deleted": false,
+        "title": "Grüße",
+        "amount": 12345678901234567.89,
+        "due": "2026-09-27T10:15:00+02:00",
+        "tags": ["a", "b"]
+      }
+    },
+    {
+      "operationId": "0192f0a1b2c37d4e8f9a0b1c2d3e4f51",
+      "kind": "conflict",
+      "version": "9007199254740996",
+      "document": {
+        "id": "n2",
+        "updatedAt": "001790000000002:000000:device-c",
+        "deleted": false,
+        "title": "edited elsewhere",
+        "amount": 1.5,
+        "due": null,
+        "tags": []
+      }
+    },
+    {
+      "operationId": "0192f0a1b2c37d4e8f9a0b1c2d3e4f52",
+      "kind": "rejected",
+      "errorCode": "forbidden",
+      "message": "Not allowed."
+    },
+    {
+      "operationId": "0192f0a1b2c37d4e8f9a0b1c2d3e4f53",
+      "kind": "retry-later",
+      "errorCode": "unavailable"
+    },
+    {
+      "operationId": "0192f0a1b2c37d4e8f9a0b1c2d3e4f54",
+      "kind": "accepted",
+      "version": "7",
+      "document": {
+        "id": "n3",
+        "updatedAt": "001790000000003:000000:device-a",
+        "deleted": false,
+        "title": "replayed",
+        "amount": 0,
+        "due": null,
+        "tags": []
+      },
+      "duplicate": true
+    }
+  ]
+}

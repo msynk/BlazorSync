@@ -180,7 +180,7 @@ public sealed class BaselineRegressionTests
     {
         var frozen = new ManualClock(1_000);
         var server = InMemorySyncServerRef.Create();
-        var durable = new Storage.InMemoryLocalStore<Note>();
+        var durable = new Storage.InMemoryLocalStore<Note>(NoteJson.Clone);
 
         var first = new TestReplica(server, "a", physicalClock: frozen, store: durable);
         var t1 = (await first.Engine.WriteAsync(new Note { Id = "n1" })).UpdatedAt;

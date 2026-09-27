@@ -21,5 +21,11 @@
 
 ## Current state
 
-No wire encoding exists yet: all transports are in-process. The in-memory authority's receipt fingerprint
-is computed from the document's JSON serialization (or an explicit fingerprint function).
+- The JSON encoding is normative in `docs/protocol/v1.md` and enforced by strict converters in
+  `BlazorSync.Protocol` (`WireInt64JsonConverter`, `HlcTimestampJsonConverter`, `CheckpointJsonConverter`,
+  `PushOutcomeKindJsonConverter`) and by valid/invalid fixtures.
+- Reflection-based defaults are annotated with `[RequiresUnreferencedCode]`/`[RequiresDynamicCode]`; the
+  library is `IsAotCompatible` and builds without warnings; trim-safe overloads take delegates or
+  `JsonTypeInfo<T>`.
+- Unknown document fields survive only for documents that declare `[JsonExtensionData]`.
+- Protocol/schema version headers are specified for the HTTP binding (Phase 4) but not implemented.

@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using BlazorSync.Clocks;
 using BlazorSync.Documents;
 
@@ -18,17 +19,20 @@ public sealed class InMemoryLocalStore<TDocument> : ILocalStore<TDocument>
     private Checkpoint _checkpoint = Checkpoint.Start;
     private HlcTimestamp _highWater = HlcTimestamp.MinValue;
 
-    /// <summary>
-    /// Creates a store using the supplied deep-clone function. When <paramref name="cloner"/> is
-    /// <see langword="null"/> a reflection-based JSON clone is used, which is not trim/AOT safe;
-    /// supply an explicit cloner for Blazor WebAssembly publish builds.
-    /// </summary>
-#pragma warning disable IL2026, IL3050 // Default cloner is reflection-based; suppressed so a supplied cloner is warning-free.
-    public InMemoryLocalStore(Func<TDocument, TDocument>? cloner = null)
+    /// <summary>Creates a store that clones with reflection-based JSON (not trim/AOT safe).</summary>
+    [RequiresUnreferencedCode("Clones documents with reflection-based JSON. Use the constructor that takes a cloner for trimmed or AOT targets.")]
+    [RequiresDynamicCode("Clones documents with reflection-based JSON. Use the constructor that takes a cloner for trimmed or AOT targets.")]
+    public InMemoryLocalStore()
+        : this(static doc => DocumentCloner.JsonClone(doc))
     {
-        _clone = cloner ?? (static doc => DocumentCloner.JsonClone(doc));
     }
-#pragma warning restore IL2026, IL3050
+
+    /// <summary>Creates a store using the supplied deep-clone function.</summary>
+    public InMemoryLocalStore(Func<TDocument, TDocument> cloner)
+    {
+        ArgumentNullException.ThrowIfNull(cloner);
+        _clone = cloner;
+    }
 
     /// <inheritdoc />
     public Task<SyncRecord<TDocument>?> GetAsync(string id, CancellationToken cancellationToken = default)
@@ -66,7 +70,8 @@ public sealed class InMemoryLocalStore<TDocument> : ILocalStore<TDocument>
                 var next = update.Transform(existing);
                 if (next is null)
                 {
-                    staged.Add((update.Id, existing, false));
+                    // Report the committed state, not the transform's working copy (it may have mutated it).
+                    staged.Add((update.Id, stored, false));
                     continue;
                 }
 

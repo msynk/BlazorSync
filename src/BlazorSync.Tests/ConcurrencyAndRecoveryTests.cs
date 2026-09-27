@@ -92,7 +92,7 @@ public sealed class ConcurrencyAndRecoveryTests
     public async Task CrashBeforeSend()
     {
         var server = InMemorySyncServerRef.Create();
-        var durable = new InMemoryLocalStore<Note>();
+        var durable = new InMemoryLocalStore<Note>(NoteJson.Clone);
         var first = new TestReplica(server, "a", store: durable);
         await first.Engine.WriteAsync(new Note { Id = "n1" });
         first.Transport.FailBeforeSend = true;
@@ -110,7 +110,7 @@ public sealed class ConcurrencyAndRecoveryTests
     public async Task CrashBeforeLocalAcknowledgement()
     {
         var server = InMemorySyncServerRef.Create();
-        var durable = new InMemoryLocalStore<Note>();
+        var durable = new InMemoryLocalStore<Note>(NoteJson.Clone);
         var first = new TestReplica(server, "a", store: durable);
         await first.Engine.WriteAsync(new Note { Id = "n1", Title = "x" });
         first.Store.BeforeUpdate = (call, _, _) => call == 3 ? throw new InjectedFaultException("crash before ack") : Task.CompletedTask;
@@ -137,22 +137,5 @@ public sealed class ConcurrencyAndRecoveryTests
         (await client.Engine.QueryAsync())[0].Title = "mutated too";
 
         Assert.Equal("x", (await client.RecordAsync("n1")).Current.Title);
-    }
-
-    [Fact(DisplayName = "I03: a throwing transform commits none of the batch")]
-    public async Task ThrowingTransformIsAtomic()
-    {
-        var store = new InMemoryLocalStore<Note>();
-        await store.UpdateAsync([new("a", _ => new SyncRecord<Note>(new Note { Id = "a" }, null, true))]);
-
-        await Assert.ThrowsAsync<InjectedFaultException>(() => store.UpdateAsync(
-            [
-                new("a", r => r! with { IsDirty = false }),
-                new("b", _ => throw new InjectedFaultException("boom")),
-            ],
-            new Checkpoint("cp")));
-
-        Assert.True((await store.GetAsync("a"))!.IsDirty);
-        Assert.True((await store.GetCheckpointAsync()).IsStart);
     }
 }

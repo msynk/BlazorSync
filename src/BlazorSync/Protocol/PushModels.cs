@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace BlazorSync.Protocol;
 
 /// <summary>
@@ -16,10 +18,10 @@ namespace BlazorSync.Protocol;
 /// </param>
 /// <param name="Document">The full new state (or tombstone) of the document.</param>
 public sealed record PushOperation<TDocument>(
-    string OperationId,
-    string DocumentId,
-    long? BaseVersion,
-    TDocument Document)
+    [property: JsonPropertyName("operationId"), JsonRequired] string OperationId,
+    [property: JsonPropertyName("documentId"), JsonRequired] string DocumentId,
+    [property: JsonPropertyName("baseVersion"), JsonRequired, JsonIgnore(Condition = JsonIgnoreCondition.Never), JsonConverter(typeof(WireNullableInt64JsonConverter))] long? BaseVersion,
+    [property: JsonPropertyName("document"), JsonRequired] TDocument Document)
     where TDocument : class, ISyncEntity;
 
 /// <summary>
@@ -28,28 +30,34 @@ public sealed record PushOperation<TDocument>(
 /// </summary>
 /// <typeparam name="TDocument">The synchronized entity type.</typeparam>
 /// <param name="Operations">The operations, at most one per document.</param>
-public sealed record PushRequest<TDocument>(IReadOnlyList<PushOperation<TDocument>> Operations)
+public sealed record PushRequest<TDocument>(
+    [property: JsonPropertyName("operations"), JsonRequired] IReadOnlyList<PushOperation<TDocument>> Operations)
     where TDocument : class, ISyncEntity;
 
 /// <summary>The server's decision for one operation.</summary>
+[JsonConverter(typeof(PushOutcomeKindJsonConverter))]
 public enum PushOutcomeKind
 {
     /// <summary>The write was committed; the outcome carries the authoritative state and version.</summary>
+    [JsonStringEnumMemberName("accepted")]
     Accepted = 0,
 
     /// <summary>
     /// The base version did not match; nothing was written. The outcome carries the server's current
     /// state and version for conflict resolution.
     /// </summary>
+    [JsonStringEnumMemberName("conflict")]
     Conflict = 1,
 
     /// <summary>
     /// The write was permanently refused (validation, authorization, clock skew, operation id reuse).
     /// Resending the same operation will not succeed.
     /// </summary>
+    [JsonStringEnumMemberName("rejected")]
     Rejected = 2,
 
     /// <summary>The server could not decide now; the same operation should be retried later.</summary>
+    [JsonStringEnumMemberName("retry-later")]
     RetryLater = 3,
 }
 
@@ -57,25 +65,38 @@ public enum PushOutcomeKind
 /// <typeparam name="TDocument">The synchronized entity type.</typeparam>
 /// <param name="OperationId">The id of the operation this outcome answers.</param>
 /// <param name="Kind">The decision.</param>
-public sealed record PushOutcome<TDocument>(string OperationId, PushOutcomeKind Kind)
+public sealed record PushOutcome<TDocument>(
+    [property: JsonPropertyName("operationId"), JsonRequired] string OperationId,
+    [property: JsonPropertyName("kind"), JsonRequired] PushOutcomeKind Kind)
     where TDocument : class, ISyncEntity
 {
     /// <summary>The server version after acceptance, or the current version on conflict.</summary>
+    [JsonPropertyName("version")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonConverter(typeof(WireNullableInt64JsonConverter))]
     public long? Version { get; init; }
 
     /// <summary>The authoritative state after acceptance, or the current state on conflict.</summary>
+    [JsonPropertyName("document")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public TDocument? Document { get; init; }
 
     /// <summary>A stable machine-readable reason for <see cref="PushOutcomeKind.Rejected"/> or <see cref="PushOutcomeKind.RetryLater"/>.</summary>
+    [JsonPropertyName("errorCode")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ErrorCode { get; init; }
 
     /// <summary>A human-readable explanation. Not localized; do not show verbatim to end users.</summary>
+    [JsonPropertyName("message")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Message { get; init; }
 
     /// <summary>
     /// <see langword="true"/> when the server had already decided this operation and is replaying the
     /// stored outcome without applying anything again.
     /// </summary>
+    [JsonPropertyName("duplicate")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool IsDuplicate { get; init; }
 
     /// <summary>Creates an accepted outcome.</summary>
@@ -101,7 +122,8 @@ public sealed record PushOutcome<TDocument>(string OperationId, PushOutcomeKind 
 /// </summary>
 /// <typeparam name="TDocument">The synchronized entity type.</typeparam>
 /// <param name="Outcomes">The per-operation outcomes.</param>
-public sealed record PushResult<TDocument>(IReadOnlyList<PushOutcome<TDocument>> Outcomes)
+public sealed record PushResult<TDocument>(
+    [property: JsonPropertyName("outcomes"), JsonRequired] IReadOnlyList<PushOutcome<TDocument>> Outcomes)
     where TDocument : class, ISyncEntity;
 
 /// <summary>Well-known <see cref="PushOutcome{TDocument}.ErrorCode"/> values.</summary>

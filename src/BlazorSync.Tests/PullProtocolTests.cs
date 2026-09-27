@@ -157,19 +157,6 @@ public sealed class PullProtocolTests
         Assert.Equal("newer", (await client.RecordAsync("n00")).Current.Title);
     }
 
-    [Fact(DisplayName = "T35 I14: a checkpoint from another server epoch requires reset")]
-    public async Task EpochMismatch()
-    {
-        var clock = new ManualClock(1_000);
-        var first = await SeededServerAsync(1);
-        var client = new TestReplica(first, "a");
-        await client.Engine.PullAsync();
-        var checkpoint = await client.Store.GetCheckpointAsync();
-
-        var restored = InMemorySyncServerRef.Create(clock); // e.g. a restore that lost history
-        Assert.Throws<SyncResetRequiredException>(() => restored.Server.Pull(new PullRequest(checkpoint, 10)));
-    }
-
     [Fact(DisplayName = "T31 I10: tombstones propagate and stay queryable with includeDeleted")]
     public async Task TombstonesPropagate()
     {

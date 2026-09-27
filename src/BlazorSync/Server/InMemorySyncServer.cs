@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
@@ -13,16 +14,14 @@ namespace BlazorSync.Server;
 public sealed class InMemorySyncServerOptions<TDocument>
     where TDocument : class, ISyncEntity
 {
-    /// <summary>
-    /// Deep-clone function. Defaults to a reflection-based JSON round-trip (not trim/AOT safe).
-    /// </summary>
-    public Func<TDocument, TDocument>? Cloner { get; init; }
+    /// <summary>Deep-clone function (for example <c>DocumentCloner.Json(context.MyDocument)</c>).</summary>
+    public required Func<TDocument, TDocument> Cloner { get; init; }
 
     /// <summary>
     /// Produces a canonical string for a document, used to detect an operation id reused with a
-    /// different payload. Defaults to reflection-based JSON serialization (not trim/AOT safe).
+    /// different payload (for example <c>DocumentCloner.JsonFingerprint(context.MyDocument)</c>).
     /// </summary>
-    public Func<TDocument, string>? Fingerprint { get; init; }
+    public required Func<TDocument, string> Fingerprint { get; init; }
 
     /// <summary>The physical clock used to validate origin timestamps. Defaults to the system clock.</summary>
     public IPhysicalClock? PhysicalClock { get; init; }
@@ -78,36 +77,42 @@ public sealed class InMemorySyncServer<TDocument>
     private long _sequence;
 
     /// <summary>
-    /// Creates a server. When <paramref name="cloner"/> is <see langword="null"/> a reflection-based JSON
-    /// clone is used; supply an explicit cloner (and use the options overload to supply a fingerprint)
-    /// for trim/AOT-safe hosts.
+    /// Creates a server that clones and fingerprints documents with reflection-based JSON (not
+    /// trim/AOT safe). Use the options constructor in trimmed or AOT-compiled apps.
     /// </summary>
     /// <param name="serverId">Prefix of the server's epoch identifier.</param>
-    /// <param name="cloner">Optional deep-clone function.</param>
-    public InMemorySyncServer(string serverId = "server", Func<TDocument, TDocument>? cloner = null)
-        : this(new InMemorySyncServerOptions<TDocument> { Cloner = cloner }, serverId)
+    [RequiresUnreferencedCode("Uses reflection-based JSON. Use the options constructor for trimmed or AOT targets.")]
+    [RequiresDynamicCode("Uses reflection-based JSON. Use the options constructor for trimmed or AOT targets.")]
+    public InMemorySyncServer(string serverId = "server")
+        : this(
+            new InMemorySyncServerOptions<TDocument>
+            {
+                Cloner = static doc => DocumentCloner.JsonClone(doc),
+                Fingerprint = static doc => JsonSerializer.Serialize(doc),
+            },
+            serverId)
     {
     }
 
     /// <summary>Creates a server from <paramref name="options"/>.</summary>
     /// <param name="options">The configuration.</param>
     /// <param name="serverId">Prefix of the server's epoch identifier.</param>
-#pragma warning disable IL2026, IL3050 // Defaults are reflection-based; suppressed so supplied delegates are warning-free.
     public InMemorySyncServer(InMemorySyncServerOptions<TDocument> options, string serverId = "server")
     {
         ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(options.Cloner, nameof(options.Cloner));
+        ArgumentNullException.ThrowIfNull(options.Fingerprint, nameof(options.Fingerprint));
         ArgumentException.ThrowIfNullOrEmpty(serverId);
         ArgumentOutOfRangeException.ThrowIfLessThan(options.MaxOperationsPerPush, 1, nameof(options.MaxOperationsPerPush));
         ArgumentOutOfRangeException.ThrowIfLessThan(options.MaxPageSize, 1, nameof(options.MaxPageSize));
         ArgumentOutOfRangeException.ThrowIfLessThan(options.MaxClockSkew, TimeSpan.Zero, nameof(options.MaxClockSkew));
 
         _options = options;
-        _clone = options.Cloner ?? (static doc => DocumentCloner.JsonClone(doc));
-        _fingerprint = options.Fingerprint ?? (static doc => JsonSerializer.Serialize(doc));
+        _clone = options.Cloner;
+        _fingerprint = options.Fingerprint;
         _physical = options.PhysicalClock ?? SystemPhysicalClock.Instance;
         Epoch = $"{serverId}-{Guid.NewGuid():N}";
     }
-#pragma warning restore IL2026, IL3050
 
     /// <summary>
     /// Identifies this server's feed history. Checkpoints from another epoch cannot be resumed.

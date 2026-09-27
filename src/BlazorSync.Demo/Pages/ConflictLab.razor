@@ -93,7 +93,7 @@
 
     private void Build()
     {
-        _server = new InMemorySyncServer<DemoNote>("cloud", static n => n.Clone());
+        _server = DemoWorkspace.CreateServer();
         _deviceA = new DeviceContext("Laptop", "laptop-lab", _server, _log);
         _deviceB = new DeviceContext("Phone", "phone-lab", _server, _log);
         _step = 0;

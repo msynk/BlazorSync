@@ -1,0 +1,31 @@
+{
+  "changes": [
+    {
+      "document": {
+        "id": "ノート-😀",
+        "updatedAt": "001790000000000:000000:device-a",
+        "deleted": false,
+        "title": "Grüße",
+        "amount": 12345678901234567.89,
+        "due": "2026-09-27T10:15:00+02:00",
+        "tags": ["a", "b"],
+        "colour": "unknown to this client, must be preserved"
+      },
+      "version": "9007199254740993"
+    },
+    {
+      "document": {
+        "id": "n2",
+        "updatedAt": "001790000000001:000003:device-b",
+        "deleted": true,
+        "title": null,
+        "amount": 0,
+        "due": null,
+        "tags": []
+      },
+      "version": "9007199254740994"
+    }
+  ],
+  "checkpoint": "cloud-5f0c2d7e9a1b4c3d8e6f7a8b9c0d1e2f:9007199254740994",
+  "hasMore": true
+}
