@@ -84,7 +84,9 @@ public sealed class DemoWorkspace
     {
         _devices.Clear();
         _deviceCounter = 0;
-        _server = new InMemorySyncServer<DemoNote>("cloud", static n => n.Clone());
+        _server = new InMemorySyncServer<DemoNote>(
+            new InMemorySyncServerOptions<DemoNote> { Cloner = static n => n.Clone(), Fingerprint = DemoJsonContext.Fingerprint },
+            "cloud");
         Log.Clear();
         Log.Add(ActivityKind.System, "workspace", "reset — fresh cloud and two devices");
 

@@ -5,7 +5,7 @@ namespace BlazorSync.Protocol;
 /// </summary>
 public enum StreamEventKind
 {
-    /// <summary>The event carries a batch of changed documents and a new checkpoint.</summary>
+    /// <summary>The event carries a batch of changes and a new checkpoint.</summary>
     Changes = 0,
 
     /// <summary>
@@ -17,35 +17,34 @@ public enum StreamEventKind
 }
 
 /// <summary>
-/// An event from the server's live change stream, consumed during the "event observation" phase of
-/// replication. Either a batch of changed documents or a <see cref="StreamEventKind.Resync"/>
-/// signal.
+/// An event from the server's live change stream. Live events are hints: missing any of them must
+/// only delay synchronization until the next checkpoint pull, never lose data.
 /// </summary>
 /// <typeparam name="TDocument">The synchronized entity type.</typeparam>
 public sealed record StreamEvent<TDocument>
     where TDocument : class, ISyncEntity
 {
-    private StreamEvent(StreamEventKind kind, IReadOnlyList<TDocument> documents, Checkpoint checkpoint)
+    private StreamEvent(StreamEventKind kind, IReadOnlyList<RemoteChange<TDocument>> changes, Checkpoint checkpoint)
     {
         Kind = kind;
-        Documents = documents;
+        Changes = changes;
         Checkpoint = checkpoint;
     }
 
     /// <summary>The event kind.</summary>
     public StreamEventKind Kind { get; }
 
-    /// <summary>The changed documents (empty for a resync event).</summary>
-    public IReadOnlyList<TDocument> Documents { get; }
+    /// <summary>The changes (empty for a resync event).</summary>
+    public IReadOnlyList<RemoteChange<TDocument>> Changes { get; }
 
-    /// <summary>The checkpoint after applying <see cref="Documents"/> (ignored for a resync event).</summary>
+    /// <summary>The checkpoint after applying <see cref="Changes"/> (ignored for a resync event).</summary>
     public Checkpoint Checkpoint { get; }
 
     /// <summary>Creates a changes event.</summary>
-    public static StreamEvent<TDocument> ForChanges(IReadOnlyList<TDocument> documents, Checkpoint checkpoint) =>
-        new(StreamEventKind.Changes, documents, checkpoint);
+    public static StreamEvent<TDocument> ForChanges(IReadOnlyList<RemoteChange<TDocument>> changes, Checkpoint checkpoint) =>
+        new(StreamEventKind.Changes, changes, checkpoint);
 
     /// <summary>Creates a resync signal event.</summary>
     public static StreamEvent<TDocument> Resync() =>
-        new(StreamEventKind.Resync, Array.Empty<TDocument>(), Checkpoint.Start);
+        new(StreamEventKind.Resync, Array.Empty<RemoteChange<TDocument>>(), Checkpoint.Start);
 }

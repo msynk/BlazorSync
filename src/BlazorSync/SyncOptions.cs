@@ -1,26 +1,49 @@
 namespace BlazorSync;
 
-/// <summary>Tuning knobs for a <c>SyncEngine</c>.</summary>
+/// <summary>Tuning knobs and work budgets for a <c>SyncEngine</c>.</summary>
 /// <typeparam name="TDocument">The synchronized entity type.</typeparam>
 public sealed class SyncOptions<TDocument>
     where TDocument : class, ISyncEntity
 {
-    /// <summary>Maximum documents requested per pull batch. Default 100.</summary>
+    /// <summary>Maximum documents requested per pull page. Default 100.</summary>
     public int PullBatchSize { get; init; } = 100;
 
-    /// <summary>Maximum local writes sent per push batch. Default 100.</summary>
+    /// <summary>
+    /// Maximum pull pages applied by one pull. When reached, the pull stops at a committed checkpoint
+    /// and reports <see cref="SyncResult.HasRemainingWork"/>. Default 1000.
+    /// </summary>
+    public int MaxPullPages { get; init; } = 1000;
+
+    /// <summary>Maximum operations sent per push request. Default 100.</summary>
     public int PushBatchSize { get; init; } = 100;
 
     /// <summary>
-    /// Safety bound on how many push passes a single sync performs. Each pass can generate new dirty
-    /// records when conflicts resolve to a merged document that must be re-pushed; this cap prevents
-    /// a pathological loop. Default 16.
+    /// Maximum push requests sent by one push. Normal queue draining uses as many batches as needed up
+    /// to this bound; when it is reached the push reports <see cref="SyncResult.HasRemainingWork"/>.
+    /// Default 100.
     /// </summary>
-    public int MaxPushPasses { get; init; } = 16;
+    public int MaxPushBatches { get; init; } = 100;
 
     /// <summary>
-    /// Deep-clone function used to keep current/base states isolated. Defaults to a JSON round-trip;
-    /// supply a source-generated cloner for trimmed/AOT (WASM) builds.
+    /// Maximum conflicts resolved for one document within one push. A document that keeps conflicting
+    /// is left pending and counted in <see cref="SyncResult.Deferred"/> so that it cannot starve
+    /// unrelated documents. Default 3.
+    /// </summary>
+    public int MaxConflictRetries { get; init; } = 3;
+
+    /// <summary>
+    /// Deep-clone function used to keep current, base and pending states isolated. Defaults to a JSON
+    /// round-trip; supply a source-generated or hand-written cloner for trimmed/AOT (WASM) builds.
     /// </summary>
     public Func<TDocument, TDocument>? Cloner { get; init; }
+
+    /// <summary>Throws <see cref="ArgumentOutOfRangeException"/> if any value is out of range.</summary>
+    public void Validate()
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(PullBatchSize, 1, nameof(PullBatchSize));
+        ArgumentOutOfRangeException.ThrowIfLessThan(MaxPullPages, 1, nameof(MaxPullPages));
+        ArgumentOutOfRangeException.ThrowIfLessThan(PushBatchSize, 1, nameof(PushBatchSize));
+        ArgumentOutOfRangeException.ThrowIfLessThan(MaxPushBatches, 1, nameof(MaxPushBatches));
+        ArgumentOutOfRangeException.ThrowIfLessThan(MaxConflictRetries, 1, nameof(MaxConflictRetries));
+    }
 }

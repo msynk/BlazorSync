@@ -7,8 +7,10 @@ namespace BlazorSync.Conflicts;
 /// </summary>
 /// <remarks>
 /// Because conflicts are re-pushed against the real master, the local change is never silently lost.
-/// The trade-off is that a concurrent change made elsewhere can be overwritten; choose
-/// <see cref="LastWriteWinsConflictHandler{TDocument}"/> or a custom merge when that matters.
+/// The trade-off is that a concurrent change made elsewhere is overwritten (a lossy policy), and the
+/// final state depends on which replica uploads last. The resolved state is treated as a new local edit
+/// and re-stamped. Choose <see cref="LastWriteWinsConflictHandler{TDocument}"/> for an upload-order
+/// independent result, or a custom three-way merge when neither edit may be lost.
 /// </remarks>
 /// <typeparam name="TDocument">The synchronized entity type.</typeparam>
 public sealed class ClientWinsConflictHandler<TDocument> : IConflictHandler<TDocument>
@@ -36,10 +38,17 @@ public sealed class ServerWinsConflictHandler<TDocument> : IConflictHandler<TDoc
 }
 
 /// <summary>
-/// Resolves by comparing Hybrid Logical Clock timestamps: the document with the greater
-/// <see cref="ISyncEntity.UpdatedAt"/> wins. Because HLC ordering is a deterministic total order, all
-/// peers reach the same result. Ties (which require identical node ids) fall back to the server.
+/// Resolves by comparing authoring timestamps: the state with the greater origin
+/// <see cref="ISyncEntity.UpdatedAt"/> wins, whole-document, including deletions. A winning local
+/// state is re-pushed with its original timestamp (<see cref="ConflictResolution{TDocument}.KeepFork"/>),
+/// so the result does not depend on which replica uploads first. Ties (which require identical node
+/// ids) fall back to the server.
 /// </summary>
+/// <remarks>
+/// This is a lossy policy: the losing concurrent edit is discarded. Its correctness depends on replica
+/// clocks being roughly synchronized; the server bounds forward skew but cannot detect a clock that runs
+/// behind.
+/// </remarks>
 /// <typeparam name="TDocument">The synchronized entity type.</typeparam>
 public sealed class LastWriteWinsConflictHandler<TDocument> : IConflictHandler<TDocument>
     where TDocument : class, ISyncEntity
@@ -49,7 +58,7 @@ public sealed class LastWriteWinsConflictHandler<TDocument> : IConflictHandler<T
     {
         ArgumentNullException.ThrowIfNull(context);
         return context.Fork.UpdatedAt > context.RealMaster.UpdatedAt
-            ? ConflictResolution<TDocument>.Resolve(context.Fork)
+            ? ConflictResolution<TDocument>.KeepFork()
             : ConflictResolution<TDocument>.AcceptMaster();
     }
 }

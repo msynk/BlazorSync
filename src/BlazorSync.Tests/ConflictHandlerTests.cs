@@ -45,7 +45,8 @@ public sealed class ConflictHandlerTests
         var forkNewer = handler.Resolve(Context("local", "remote", forkTime: 30, masterTime: 20));
         var masterNewer = handler.Resolve(Context("local", "remote", forkTime: 10, masterTime: 20));
 
-        Assert.Equal(ConflictOutcome.UseResolved, forkNewer.Outcome);
+        // The winning fork is kept with its original authoring timestamp rather than re-stamped.
+        Assert.Equal(ConflictOutcome.KeepFork, forkNewer.Outcome);
         Assert.Equal(ConflictOutcome.UseMaster, masterNewer.Outcome);
     }
 

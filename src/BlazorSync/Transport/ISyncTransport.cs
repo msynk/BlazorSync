@@ -11,17 +11,20 @@ namespace BlazorSync.Transport;
 public interface ISyncTransport<TDocument>
     where TDocument : class, ISyncEntity
 {
-    /// <summary>Pulls the next batch of server changes after the request's checkpoint.</summary>
+    /// <summary>Pulls the next page of server changes after the request's checkpoint.</summary>
     Task<PullResult<TDocument>> PullAsync(PullRequest request, CancellationToken cancellationToken = default);
 
-    /// <summary>Pushes a batch of local writes and returns any conflicts.</summary>
+    /// <summary>
+    /// Sends a batch of operations and returns their outcomes. If this throws, or is cancelled, after
+    /// the request may have reached the server, the outcome is unknown: the engine keeps the operations
+    /// pending and resends them with the same ids.
+    /// </summary>
     Task<PushResult<TDocument>> PushAsync(PushRequest<TDocument> request, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Subscribes to the server's live change stream for event-observation mode (Phase 3). The
-    /// stream emits batches of changes and periodic <see cref="StreamEventKind.Resync"/> signals.
-    /// Implementations that do not support live streaming may throw
-    /// <see cref="NotSupportedException"/>; the engine falls back to checkpoint iteration.
+    /// Subscribes to the server's live change stream. Not consumed by the engine yet; see
+    /// <c>docs/roadmap.md</c>. Implementations that do not support live streaming may throw
+    /// <see cref="NotSupportedException"/>.
     /// </summary>
     IAsyncEnumerable<StreamEvent<TDocument>> StreamAsync(Checkpoint since, CancellationToken cancellationToken = default);
 }

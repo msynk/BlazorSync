@@ -1,11 +1,12 @@
+using BlazorSync.Clocks;
 using BlazorSync.Documents;
 
 namespace BlazorSync.Storage;
 
 /// <summary>
 /// An in-memory <see cref="ILocalStore{TDocument}"/>. Useful for tests, prototypes and ephemeral
-/// (non-persisted) scenarios. All stored states are deep-cloned on the way in and out so callers can
-/// never accidentally mutate the store's internal copies.
+/// scenarios. It is <b>not durable</b>: everything is lost when the process ends. All stored states
+/// are deep-cloned on the way in and out so callers can never mutate the store's internal copies.
 /// </summary>
 /// <typeparam name="TDocument">The synchronized entity type.</typeparam>
 public sealed class InMemoryLocalStore<TDocument> : ILocalStore<TDocument>
@@ -15,6 +16,7 @@ public sealed class InMemoryLocalStore<TDocument> : ILocalStore<TDocument>
     private readonly Func<TDocument, TDocument> _clone;
     private readonly object _gate = new();
     private Checkpoint _checkpoint = Checkpoint.Start;
+    private HlcTimestamp _highWater = HlcTimestamp.MinValue;
 
     /// <summary>
     /// Creates a store using the supplied deep-clone function. When <paramref name="cloner"/> is
@@ -28,9 +30,6 @@ public sealed class InMemoryLocalStore<TDocument> : ILocalStore<TDocument>
     }
 #pragma warning restore IL2026, IL3050
 
-    private SyncRecord<TDocument> CloneRecord(SyncRecord<TDocument> record) =>
-        new(_clone(record.Current), record.Base is { } b ? _clone(b) : null, record.IsDirty);
-
     /// <inheritdoc />
     public Task<SyncRecord<TDocument>?> GetAsync(string id, CancellationToken cancellationToken = default)
     {
@@ -42,30 +41,92 @@ public sealed class InMemoryLocalStore<TDocument> : ILocalStore<TDocument>
     }
 
     /// <inheritdoc />
-    public Task UpsertAsync(SyncRecord<TDocument> record, CancellationToken cancellationToken = default)
+    public Task<IReadOnlyList<RecordUpdateResult<TDocument>>> UpdateAsync(
+        IReadOnlyList<RecordUpdate<TDocument>> updates,
+        Checkpoint? checkpoint = null,
+        CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(record);
+        ArgumentNullException.ThrowIfNull(updates);
+        cancellationToken.ThrowIfCancellationRequested();
+
         lock (_gate)
         {
-            _records[record.Current.Id] = CloneRecord(record);
-        }
+            // Compute every new state first so that a throwing transform commits nothing.
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            var staged = new List<(string Id, SyncRecord<TDocument>? Record, bool Changed)>(updates.Count);
+            foreach (var update in updates)
+            {
+                ArgumentNullException.ThrowIfNull(update);
+                if (!seen.Add(update.Id))
+                {
+                    throw new ArgumentException($"Duplicate record id '{update.Id}' in one update.", nameof(updates));
+                }
 
-        return Task.CompletedTask;
+                var existing = _records.TryGetValue(update.Id, out var stored) ? CloneRecord(stored) : null;
+                var next = update.Transform(existing);
+                if (next is null)
+                {
+                    staged.Add((update.Id, existing, false));
+                    continue;
+                }
+
+                if (!string.Equals(next.Current.Id, update.Id, StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException(
+                        $"Transform for '{update.Id}' returned a record with id '{next.Current.Id}'.");
+                }
+
+                staged.Add((update.Id, CloneRecord(next), true));
+            }
+
+            var results = new List<RecordUpdateResult<TDocument>>(staged.Count);
+            foreach (var (id, record, changed) in staged)
+            {
+                if (changed)
+                {
+                    _records[id] = record!;
+                    ObserveTimestamps(record!);
+                }
+
+                results.Add(new RecordUpdateResult<TDocument>(record is null ? null : CloneRecord(record), changed));
+            }
+
+            if (checkpoint is { } committed)
+            {
+                _checkpoint = committed;
+            }
+
+            return Task.FromResult<IReadOnlyList<RecordUpdateResult<TDocument>>>(results);
+        }
     }
 
     /// <inheritdoc />
-    public Task<IReadOnlyList<SyncRecord<TDocument>>> GetDirtyAsync(int batchSize, CancellationToken cancellationToken = default)
+    public Task<IReadOnlyList<SyncRecord<TDocument>>> GetPendingAsync(
+        int limit,
+        IReadOnlySet<string>? exclude = null,
+        CancellationToken cancellationToken = default)
     {
+        ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
         lock (_gate)
         {
-            var dirty = _records.Values
-                .Where(static r => r.IsDirty)
+            var pending = _records.Values
+                .Where(r => r.IsPushable && (exclude is null || !exclude.Contains(r.Current.Id)))
                 .OrderBy(static r => r.Current.UpdatedAt)
-                .Take(batchSize)
+                .ThenBy(static r => r.Current.Id, StringComparer.Ordinal)
+                .Take(limit)
                 .Select(CloneRecord)
                 .ToList();
 
-            return Task.FromResult<IReadOnlyList<SyncRecord<TDocument>>>(dirty);
+            return Task.FromResult<IReadOnlyList<SyncRecord<TDocument>>>(pending);
+        }
+    }
+
+    /// <inheritdoc />
+    public Task<int> CountDirtyAsync(CancellationToken cancellationToken = default)
+    {
+        lock (_gate)
+        {
+            return Task.FromResult(_records.Values.Count(static r => r.IsDirty));
         }
     }
 
@@ -93,13 +154,33 @@ public sealed class InMemoryLocalStore<TDocument> : ILocalStore<TDocument>
     }
 
     /// <inheritdoc />
-    public Task SetCheckpointAsync(Checkpoint checkpoint, CancellationToken cancellationToken = default)
+    public Task<HlcTimestamp> GetClockHighWaterAsync(CancellationToken cancellationToken = default)
     {
         lock (_gate)
         {
-            _checkpoint = checkpoint;
+            return Task.FromResult(_highWater);
+        }
+    }
+
+    private void ObserveTimestamps(SyncRecord<TDocument> record)
+    {
+        if (record.Current.UpdatedAt > _highWater)
+        {
+            _highWater = record.Current.UpdatedAt;
         }
 
-        return Task.CompletedTask;
+        if (record.Pending is { } pending && pending.Payload.UpdatedAt > _highWater)
+        {
+            _highWater = pending.Payload.UpdatedAt;
+        }
     }
+
+    private SyncRecord<TDocument> CloneRecord(SyncRecord<TDocument> record) =>
+        record with
+        {
+            Current = _clone(record.Current),
+            Base = record.Base is { } b ? _clone(b) : null,
+            Observed = record.Observed is { } o ? _clone(o) : null,
+            Pending = record.Pending is { } p ? p with { Payload = _clone(p.Payload) } : null,
+        };
 }

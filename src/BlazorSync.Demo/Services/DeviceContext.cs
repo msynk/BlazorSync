@@ -113,7 +113,6 @@ public sealed class DeviceContext
             LastSync = result;
             await RefreshPendingAsync();
 
-            Status = $"Synced · pulled {result.Pulled}, pushed {result.Pushed}";
             var detail = $"pulled {result.Pulled}, pushed {result.Pushed}";
             if (result.Conflicts > 0)
             {
@@ -121,7 +120,22 @@ public sealed class DeviceContext
                 detail += $", {result.Conflicts} conflict(s) via {Strategy}";
             }
 
-            _log.Add(ActivityKind.Sync, Name, $"sync complete ({detail})");
+            if (result.Rejected > 0)
+            {
+                detail += $", {result.Rejected} rejected";
+            }
+
+            if (result.IsComplete)
+            {
+                Status = $"Synced · pulled {result.Pulled}, pushed {result.Pushed}";
+                _log.Add(ActivityKind.Sync, Name, $"sync complete ({detail})");
+            }
+            else
+            {
+                // A normal return is not proof that everything was sent; say so.
+                Status = "Partially synced · work remains";
+                _log.Add(ActivityKind.Sync, Name, $"sync incomplete ({detail}, {result.Deferred} deferred)");
+            }
             return true;
         }
         catch (OfflineException)
@@ -159,21 +173,7 @@ public sealed class DeviceContext
     /// <summary>Returns the sync record (with dirty/base metadata) for a note, for inspection.</summary>
     public Task<SyncRecord<DemoNote>?> GetRecordAsync(string id) => _engine.GetAsync(id);
 
-    private async Task RefreshPendingAsync()
-    {
-        var all = await _engine.QueryAsync(includeDeleted: true);
-        var count = 0;
-        foreach (var note in all)
-        {
-            var record = await _engine.GetAsync(note.Id);
-            if (record is { IsDirty: true })
-            {
-                count++;
-            }
-        }
-
-        PendingCount = count;
-    }
+    private async Task RefreshPendingAsync() => PendingCount = await _engine.CountDirtyAsync();
 
     private static string Trim(string value) =>
         value.Length <= 24 ? value : value[..24] + "…";

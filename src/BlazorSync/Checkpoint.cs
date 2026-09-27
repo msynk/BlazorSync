@@ -1,28 +1,23 @@
-using BlazorSync.Clocks;
-
 namespace BlazorSync;
 
 /// <summary>
-/// A resumable position in a collection's change stream. A checkpoint is the
-/// <see cref="HlcTimestamp"/> and <see cref="Id"/> of the last record processed. Because records
-/// are ordered deterministically by (<see cref="UpdatedAt"/>, <see cref="Id"/>), a peer can resume
-/// pulling from exactly where it left off, with no gaps and no duplicates.
+/// An opaque, server-issued resume position in a collection's change feed.
 /// </summary>
-public readonly record struct Checkpoint(HlcTimestamp UpdatedAt, string Id)
+/// <remarks>
+/// Clients store and return checkpoints verbatim and must not parse, compare or construct them. The
+/// server encodes whatever it needs to prove that everything up to the position is a committed,
+/// gap-free prefix of the feed (for example an epoch and a commit sequence). A checkpoint is only
+/// meaningful to the server and scope that issued it.
+/// </remarks>
+/// <param name="Value">The opaque token, or <see langword="null"/> for <see cref="Start"/>.</param>
+public readonly record struct Checkpoint(string? Value)
 {
-    /// <summary>The starting checkpoint representing "the beginning of time" (a full sync).</summary>
-    public static readonly Checkpoint Start = new(HlcTimestamp.MinValue, string.Empty);
+    /// <summary>The position before the first change (a full sync).</summary>
+    public static readonly Checkpoint Start = default;
 
-    /// <summary>
-    /// Returns <see langword="true"/> when <paramref name="entity"/> sorts strictly after this
-    /// checkpoint and therefore has not yet been seen by the holder of the checkpoint.
-    /// </summary>
-    public bool IsBefore(ISyncEntity entity)
-    {
-        ArgumentNullException.ThrowIfNull(entity);
-        var byTime = UpdatedAt.CompareTo(entity.UpdatedAt);
-        return byTime != 0
-            ? byTime < 0
-            : string.CompareOrdinal(Id, entity.Id) < 0;
-    }
+    /// <summary>Whether this is <see cref="Start"/>.</summary>
+    public bool IsStart => Value is null;
+
+    /// <inheritdoc />
+    public override string ToString() => Value ?? "(start)";
 }

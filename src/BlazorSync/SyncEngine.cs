@@ -7,16 +7,37 @@ using BlazorSync.Transport;
 
 namespace BlazorSync;
 
+/// <summary>The local commit receipt returned by <see cref="SyncEngine{TDocument}.WriteAsync"/> and <see cref="SyncEngine{TDocument}.DeleteAsync"/>.</summary>
+/// <remarks>
+/// A receipt means the write is committed to the local store (with the durability of that store) and
+/// queued for upload. It says nothing about server acceptance.
+/// </remarks>
+/// <param name="Id">The document id.</param>
+/// <param name="LocalRevision">The local revision created by the write.</param>
+/// <param name="UpdatedAt">The origin timestamp stamped on the stored document.</param>
+public readonly record struct LocalWriteReceipt(string Id, long LocalRevision, HlcTimestamp UpdatedAt);
+
 /// <summary>
 /// Orchestrates replication of a single collection between a local store and a server transport.
-/// <para>
-/// All protocol logic lives here so platform stores and the backend stay simple. The engine
-/// implements the two RxDB-style phases — <see cref="PullAsync"/> (checkpoint iteration, to catch up
-/// the local store) and <see cref="PushAsync"/> (send local writes and resolve conflicts on the
-/// client) — and the local write helpers (<see cref="WriteAsync"/>, <see cref="DeleteAsync"/>) that
-/// stamp Hybrid Logical Clock timestamps and queue changes for push.
-/// </para>
 /// </summary>
+/// <remarks>
+/// <para>
+/// Local writes (<see cref="WriteAsync"/>, <see cref="DeleteAsync"/>) commit atomically to the store
+/// and never wait for the network. Replication (<see cref="PullAsync"/>, <see cref="PushAsync"/>,
+/// <see cref="SyncAsync"/>) is single-flight per engine: overlapping calls run one after another.
+/// Every state change the engine makes is an atomic compare-and-transform in the store, so a local
+/// edit made while a request is in flight is never overwritten or marked clean by that request.
+/// </para>
+/// <para>
+/// Push operations carry a persisted operation id and immutable payload. When a response is lost the
+/// same operation is resent, and a conforming server replays its original outcome instead of applying
+/// the write again.
+/// </para>
+/// <para>
+/// Only one engine may replicate a given store at a time; the single-flight guarantee does not extend
+/// across engine instances or processes.
+/// </para>
+/// </remarks>
 /// <typeparam name="TDocument">The synchronized entity type.</typeparam>
 public sealed class SyncEngine<TDocument>
     where TDocument : class, ISyncEntity
@@ -27,15 +48,22 @@ public sealed class SyncEngine<TDocument>
     private readonly HybridLogicalClock _clock;
     private readonly SyncOptions<TDocument> _options;
     private readonly Func<TDocument, TDocument> _clone;
+    private readonly SemaphoreSlim _replicationGate = new(1, 1);
+    private readonly object _initGate = new();
+    private Task? _initialization;
 
     /// <summary>Creates an engine for one collection.</summary>
     /// <param name="store">The local persistence layer.</param>
     /// <param name="transport">The client-side view of the server.</param>
-    /// <param name="clock">The Hybrid Logical Clock used to stamp local writes.</param>
+    /// <param name="clock">
+    /// The Hybrid Logical Clock used to stamp local writes. Before its first write the engine advances
+    /// it past the store's high-water mark, so timestamps are not reused after a restart.
+    /// </param>
     /// <param name="conflictHandler">
     /// The conflict strategy. Defaults to <see cref="ClientWinsConflictHandler{TDocument}"/>.
     /// </param>
     /// <param name="options">Optional tuning; sensible defaults are used when omitted.</param>
+    /// <exception cref="ArgumentOutOfRangeException">An option is out of range.</exception>
 #pragma warning disable IL2026, IL3050 // Default JSON cloner is reflection-based; callers targeting AOT/trimming supply options.Cloner.
     public SyncEngine(
         ILocalStore<TDocument> store,
@@ -48,11 +76,12 @@ public sealed class SyncEngine<TDocument>
         ArgumentNullException.ThrowIfNull(transport);
         ArgumentNullException.ThrowIfNull(clock);
 
+        _options = options ?? new SyncOptions<TDocument>();
+        _options.Validate();
         _store = store;
         _transport = transport;
         _clock = clock;
         _conflictHandler = conflictHandler ?? new ClientWinsConflictHandler<TDocument>();
-        _options = options ?? new SyncOptions<TDocument>();
         _clone = _options.Cloner ?? (static doc => DocumentCloner.JsonClone(doc));
     }
 #pragma warning restore IL2026, IL3050
@@ -65,230 +94,519 @@ public sealed class SyncEngine<TDocument>
     public Task<SyncRecord<TDocument>?> GetAsync(string id, CancellationToken cancellationToken = default) =>
         _store.GetAsync(id, cancellationToken);
 
+    /// <summary>Returns the number of documents with local changes not yet confirmed by the server.</summary>
+    public Task<int> CountDirtyAsync(CancellationToken cancellationToken = default) =>
+        _store.CountDirtyAsync(cancellationToken);
+
     /// <summary>
-    /// Applies a local create or update. The document is stamped with a fresh HLC timestamp and
-    /// queued for push. The existing server baseline (if any) is preserved so conflicts can still be
-    /// detected against the last known server state.
+    /// Commits a local create or update and queues it for push. A copy of <paramref name="document"/>
+    /// is stored with a fresh HLC timestamp; the caller's object is not modified. The last-known server
+    /// baseline is preserved so conflicts are still detected against it.
     /// </summary>
-    public async Task WriteAsync(TDocument document, CancellationToken cancellationToken = default)
+    /// <exception cref="ArgumentException">The document id is invalid.</exception>
+    public async Task<LocalWriteReceipt> WriteAsync(TDocument document, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(document);
+        SyncIds.Validate(document.Id, nameof(document));
+        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
 
-        var existing = await _store.GetAsync(document.Id, cancellationToken).ConfigureAwait(false);
-        document.UpdatedAt = _clock.Now();
-        var baseline = existing?.Base is { } b ? _clone(b) : null;
+        var copy = _clone(document);
+        copy.UpdatedAt = _clock.Now();
 
-        await _store.UpsertAsync(
-            new SyncRecord<TDocument>(_clone(document), baseline, IsDirty: true),
-            cancellationToken).ConfigureAwait(false);
+        var results = await _store.UpdateAsync(
+            [new RecordUpdate<TDocument>(copy.Id, existing => existing is null
+                ? new SyncRecord<TDocument>(copy, null, IsDirty: true) { LocalRevision = 1 }
+                : existing with { Current = copy, IsDirty = true, LocalRevision = existing.LocalRevision + 1, Rejection = null })],
+            cancellationToken: cancellationToken).ConfigureAwait(false);
+
+        return new LocalWriteReceipt(copy.Id, results[0].Record!.LocalRevision, copy.UpdatedAt);
     }
 
     /// <summary>
-    /// Soft-deletes the document with <paramref name="id"/> (sets <see cref="ISyncEntity.Deleted"/>
-    /// and queues it for push). No-op if the document is unknown locally.
+    /// Soft-deletes the document with <paramref name="id"/> (stores a tombstone and queues it for push).
+    /// Returns <see langword="null"/> without writing if the document is unknown locally.
     /// </summary>
-    public async Task DeleteAsync(string id, CancellationToken cancellationToken = default)
+    public async Task<LocalWriteReceipt?> DeleteAsync(string id, CancellationToken cancellationToken = default)
     {
-        var existing = await _store.GetAsync(id, cancellationToken).ConfigureAwait(false);
-        if (existing is null)
-        {
-            return;
-        }
+        SyncIds.Validate(id);
+        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
 
-        var deleted = _clone(existing.Current);
-        deleted.Deleted = true;
-        deleted.UpdatedAt = _clock.Now();
-        var baseline = existing.Base is { } b ? _clone(b) : null;
+        var stamp = _clock.Now();
+        var results = await _store.UpdateAsync(
+            [new RecordUpdate<TDocument>(id, existing =>
+            {
+                if (existing is null)
+                {
+                    return null;
+                }
 
-        await _store.UpsertAsync(
-            new SyncRecord<TDocument>(deleted, baseline, IsDirty: true),
-            cancellationToken).ConfigureAwait(false);
+                var tombstone = existing.Current;
+                tombstone.Deleted = true;
+                tombstone.UpdatedAt = stamp;
+                return existing with { Current = tombstone, IsDirty = true, LocalRevision = existing.LocalRevision + 1, Rejection = null };
+            })],
+            cancellationToken: cancellationToken).ConfigureAwait(false);
+
+        return results[0] is { Changed: true, Record: { } record }
+            ? new LocalWriteReceipt(id, record.LocalRevision, stamp)
+            : null;
     }
 
-    /// <summary>Runs a full sync: pull server changes, then push local writes. Returns aggregate stats.</summary>
+    /// <summary>Runs a full sync: pull server changes, then push local writes.</summary>
     public async Task<SyncResult> SyncAsync(CancellationToken cancellationToken = default)
     {
-        var pull = await PullAsync(cancellationToken).ConfigureAwait(false);
-        var push = await PushAsync(cancellationToken).ConfigureAwait(false);
-        return pull + push;
+        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
+        await _replicationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var pull = await PullCoreAsync(cancellationToken).ConfigureAwait(false);
+            var push = await PushCoreAsync(cancellationToken).ConfigureAwait(false);
+            return pull + push;
+        }
+        finally
+        {
+            _replicationGate.Release();
+        }
     }
 
     /// <summary>
-    /// Checkpoint-iteration pull: repeatedly fetches batches after the stored checkpoint and applies
-    /// them, until the server reports no more changes. Dirty (locally-modified) records are left
-    /// untouched so their divergence is detected during the next push.
+    /// Pulls change-feed pages after the stored checkpoint and applies each page, together with its
+    /// checkpoint, in one atomic store update. Records with unconfirmed local changes are left untouched
+    /// so their divergence is resolved during push.
     /// </summary>
     public async Task<SyncResult> PullAsync(CancellationToken cancellationToken = default)
+    {
+        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
+        await _replicationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            return await PullCoreAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _replicationGate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Pushes pending local changes in batches until the queue is drained or a work budget is reached.
+    /// Accepted operations adopt the server's authoritative state unless the record was edited again in
+    /// the meantime; conflicts are resolved by the configured <see cref="IConflictHandler{TDocument}"/>.
+    /// </summary>
+    public async Task<SyncResult> PushAsync(CancellationToken cancellationToken = default)
+    {
+        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
+        await _replicationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            return await PushCoreAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _replicationGate.Release();
+        }
+    }
+
+    private Task EnsureInitializedAsync(CancellationToken cancellationToken)
+    {
+        lock (_initGate)
+        {
+            // Shared by all callers, so it must not observe any one caller's cancellation.
+            if (_initialization is null || _initialization.IsFaulted)
+            {
+                _initialization = InitializeAsync();
+            }
+
+            return _initialization.WaitAsync(cancellationToken);
+        }
+    }
+
+    private async Task InitializeAsync()
+    {
+        var highWater = await _store.GetClockHighWaterAsync(CancellationToken.None).ConfigureAwait(false);
+        if (highWater != HlcTimestamp.MinValue)
+        {
+            _clock.Update(highWater);
+        }
+    }
+
+    private async Task<SyncResult> PullCoreAsync(CancellationToken cancellationToken)
     {
         var applied = 0;
         var checkpoint = await _store.GetCheckpointAsync(cancellationToken).ConfigureAwait(false);
 
-        while (true)
+        for (var page = 0; page < _options.MaxPullPages; page++)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
             var result = await _transport
                 .PullAsync(new PullRequest(checkpoint, _options.PullBatchSize), cancellationToken)
                 .ConfigureAwait(false);
+            ValidatePullPage(result, checkpoint);
 
-            foreach (var serverDoc in result.Documents)
+            var updates = new List<RecordUpdate<TDocument>>(result.Changes.Count);
+            foreach (var change in result.Changes)
             {
-                // Keep the local clock ahead of anything observed from the server.
-                _clock.Update(serverDoc.UpdatedAt);
-
-                var existing = await _store.GetAsync(serverDoc.Id, cancellationToken).ConfigureAwait(false);
-                if (existing is null)
-                {
-                    var clone = _clone(serverDoc);
-                    await _store.UpsertAsync(
-                        new SyncRecord<TDocument>(clone, _clone(serverDoc), IsDirty: false),
-                        cancellationToken).ConfigureAwait(false);
-                    applied++;
-                }
-                else if (!existing.IsDirty)
-                {
-                    // Fast-forward: no local changes, so adopt the server state outright.
-                    await _store.UpsertAsync(
-                        new SyncRecord<TDocument>(_clone(serverDoc), _clone(serverDoc), IsDirty: false),
-                        cancellationToken).ConfigureAwait(false);
-                    applied++;
-                }
-                // else: dirty local record — preserve divergence; the conflict surfaces during push.
+                // Keep the local clock ahead of every timestamp observed from other replicas.
+                _clock.Update(change.Document.UpdatedAt);
+                updates.Add(new RecordUpdate<TDocument>(change.Document.Id, existing => ApplyRemote(existing, change)));
             }
 
+            var results = await _store.UpdateAsync(updates, result.Checkpoint, cancellationToken).ConfigureAwait(false);
+            applied += results.Count(static r => r.Changed);
             checkpoint = result.Checkpoint;
-            await _store.SetCheckpointAsync(checkpoint, cancellationToken).ConfigureAwait(false);
 
-            if (!result.HasMore || result.Documents.Count == 0)
+            if (!result.HasMore)
             {
-                break;
+                return new SyncResult(applied, 0, 0);
             }
         }
 
-        return new SyncResult(applied, 0, 0);
+        return new SyncResult(applied, 0, 0) { HasRemainingWork = true };
+    }
+
+    private void ValidatePullPage(PullResult<TDocument>? result, Checkpoint requested)
+    {
+        if (result?.Changes is null)
+        {
+            throw new SyncProtocolException("The server returned no pull result.");
+        }
+
+        if (result.Changes.Count > _options.PullBatchSize)
+        {
+            throw new SyncProtocolException("The server returned more changes than requested.");
+        }
+
+        if (result.HasMore && result.Checkpoint == requested)
+        {
+            throw new SyncProtocolException("The server reported more changes without advancing the checkpoint.");
+        }
+
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var change in result.Changes)
+        {
+            if (change?.Document is null || !SyncIds.IsValid(change.Document.Id) || change.Version < 1)
+            {
+                throw new SyncProtocolException("The server returned a malformed change.");
+            }
+
+            if (!ids.Add(change.Document.Id))
+            {
+                throw new SyncProtocolException($"The server returned document '{change.Document.Id}' twice in one page.");
+            }
+        }
+    }
+
+    private SyncRecord<TDocument>? ApplyRemote(SyncRecord<TDocument>? existing, RemoteChange<TDocument> change)
+    {
+        if (existing is null)
+        {
+            return new SyncRecord<TDocument>(_clone(change.Document), _clone(change.Document), IsDirty: false)
+            {
+                BaseVersion = change.Version,
+            };
+        }
+
+        // Never regress to an older or equal server version (duplicate or reordered delivery).
+        if (existing.KnownVersion is { } known && known >= change.Version)
+        {
+            return null;
+        }
+
+        // Unconfirmed local changes win locally until push resolves the divergence. The base stays the
+        // state the edit was made against; the newer server state is remembered because the checkpoint
+        // moves past it.
+        if (existing.IsDirty)
+        {
+            return existing with { Observed = _clone(change.Document), ObservedVersion = change.Version };
+        }
+
+        return existing with
+        {
+            Current = _clone(change.Document),
+            Base = _clone(change.Document),
+            BaseVersion = change.Version,
+            Observed = null,
+            ObservedVersion = null,
+        };
     }
 
     /// <summary>
-    /// Pushes dirty records to the server. Accepted writes adopt the server-authoritative state;
-    /// conflicts are resolved by the configured <see cref="IConflictHandler{TDocument}"/>. Because a
-    /// resolution can produce a merged document that must itself be pushed, this runs additional
-    /// passes until the push queue drains or <see cref="SyncOptions{TDocument}.MaxPushPasses"/> is hit.
+    /// Drops an observed server state that the base has caught up with, and makes a clean record adopt an
+    /// observed state that is newer than its base.
     /// </summary>
-    public async Task<SyncResult> PushAsync(CancellationToken cancellationToken = default)
+    private SyncRecord<TDocument> Settle(SyncRecord<TDocument> record)
+    {
+        if (record.ObservedVersion is not { } observed)
+        {
+            return record;
+        }
+
+        if (record.BaseVersion is { } baseVersion && observed <= baseVersion)
+        {
+            return record with { Observed = null, ObservedVersion = null };
+        }
+
+        return record.IsDirty
+            ? record
+            : record with
+            {
+                Current = _clone(record.Observed!),
+                Base = _clone(record.Observed!),
+                BaseVersion = observed,
+                Observed = null,
+                ObservedVersion = null,
+            };
+    }
+
+    private async Task<SyncResult> PushCoreAsync(CancellationToken cancellationToken)
     {
         var pushed = 0;
         var conflicts = 0;
+        var rejected = 0;
+        var deferred = 0;
+        var excluded = new HashSet<string>(StringComparer.Ordinal);
+        var conflictCounts = new Dictionary<string, int>(StringComparer.Ordinal);
 
-        for (var pass = 0; pass < _options.MaxPushPasses; pass++)
+        for (var batch = 0; batch < _options.MaxPushBatches; batch++)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var dirty = await _store.GetDirtyAsync(_options.PushBatchSize, cancellationToken).ConfigureAwait(false);
-            if (dirty.Count == 0)
+            var candidates = await _store.GetPendingAsync(_options.PushBatchSize, excluded, cancellationToken).ConfigureAwait(false);
+            if (candidates.Count == 0)
             {
                 break;
             }
 
-            var rows = new List<PushRow<TDocument>>(dirty.Count);
-            var pushedState = new Dictionary<string, TDocument>(dirty.Count, StringComparer.Ordinal);
-            foreach (var record in dirty)
+            var operations = await PrepareOperationsAsync(candidates, cancellationToken).ConfigureAwait(false);
+            if (operations.Count == 0)
             {
-                rows.Add(new PushRow<TDocument>(record.Base, record.Current));
-                pushedState[record.Current.Id] = record.Current;
+                continue;
             }
 
-            var result = await _transport
-                .PushAsync(new PushRequest<TDocument>(rows), cancellationToken)
+            var response = await _transport
+                .PushAsync(new PushRequest<TDocument>(operations), cancellationToken)
                 .ConfigureAwait(false);
+            var outcomes = CorrelateOutcomes(operations, response);
 
-            foreach (var accepted in result.Accepted)
+            var acknowledgements = new List<RecordUpdate<TDocument>>();
+            foreach (var operation in operations)
             {
-                await ApplyAcceptedAsync(accepted, pushedState, cancellationToken).ConfigureAwait(false);
-                pushed++;
+                if (!outcomes.TryGetValue(operation.OperationId, out var outcome))
+                {
+                    // Unknown result: keep the operation pending and resend the same id next time.
+                    excluded.Add(operation.DocumentId);
+                    deferred++;
+                    continue;
+                }
+
+                switch (outcome.Kind)
+                {
+                    case PushOutcomeKind.Accepted:
+                        _clock.Update(outcome.Document!.UpdatedAt);
+                        acknowledgements.Add(new RecordUpdate<TDocument>(
+                            operation.DocumentId,
+                            existing => ApplyAccepted(existing, operation.OperationId, outcome)));
+                        pushed++;
+                        break;
+
+                    case PushOutcomeKind.Rejected:
+                        acknowledgements.Add(new RecordUpdate<TDocument>(
+                            operation.DocumentId,
+                            existing => ApplyRejected(existing, operation.OperationId, outcome)));
+                        excluded.Add(operation.DocumentId);
+                        rejected++;
+                        break;
+
+                    case PushOutcomeKind.RetryLater:
+                        excluded.Add(operation.DocumentId);
+                        deferred++;
+                        break;
+                }
             }
 
-            foreach (var realMaster in result.Conflicts)
-            {
-                await ResolveConflictAsync(realMaster, cancellationToken).ConfigureAwait(false);
-                conflicts++;
-            }
+            await _store.UpdateAsync(acknowledgements, cancellationToken: cancellationToken).ConfigureAwait(false);
 
-            // If nothing conflicted, a single pass drained everything pushable.
-            if (result.Conflicts.Count == 0)
+            foreach (var operation in operations)
             {
-                break;
+                if (outcomes.TryGetValue(operation.OperationId, out var outcome) && outcome.Kind == PushOutcomeKind.Conflict)
+                {
+                    conflicts++;
+                    var count = conflictCounts[operation.DocumentId] = conflictCounts.GetValueOrDefault(operation.DocumentId) + 1;
+                    var stillPending = await ResolveConflictAsync(operation.OperationId, outcome, cancellationToken).ConfigureAwait(false);
+                    if (stillPending && count >= _options.MaxConflictRetries)
+                    {
+                        excluded.Add(operation.DocumentId);
+                        deferred++;
+                    }
+                }
             }
         }
 
-        return new SyncResult(0, pushed, conflicts);
+        var remaining = await _store.GetPendingAsync(1, cancellationToken: cancellationToken).ConfigureAwait(false);
+        return new SyncResult(0, pushed, conflicts)
+        {
+            Rejected = rejected,
+            Deferred = deferred,
+            HasRemainingWork = remaining.Count > 0,
+        };
     }
 
-    private async Task ApplyAcceptedAsync(
-        TDocument accepted,
-        IReadOnlyDictionary<string, TDocument> pushedState,
+    /// <summary>
+    /// Persists a new immutable operation for each candidate that does not already have one, then returns
+    /// every candidate's pending operation. Existing pending operations are resent unchanged.
+    /// </summary>
+    private async Task<List<PushOperation<TDocument>>> PrepareOperationsAsync(
+        IReadOnlyList<SyncRecord<TDocument>> candidates,
         CancellationToken cancellationToken)
     {
-        _clock.Update(accepted.UpdatedAt);
-        var existing = await _store.GetAsync(accepted.Id, cancellationToken).ConfigureAwait(false);
-
-        // If the local current state still matches what we pushed, the record is fully reconciled.
-        // If the user edited it again mid-sync, keep it dirty but rebase its baseline on the server state.
-        var editedSincePush =
-            existing is not null
-            && pushedState.TryGetValue(accepted.Id, out var sent)
-            && existing.Current.UpdatedAt != sent.UpdatedAt;
-
-        if (editedSincePush)
+        var updates = new List<RecordUpdate<TDocument>>(candidates.Count);
+        foreach (var candidate in candidates)
         {
-            await _store.UpsertAsync(
-                new SyncRecord<TDocument>(existing!.Current, _clone(accepted), IsDirty: true),
-                cancellationToken).ConfigureAwait(false);
+            var operationId = Guid.CreateVersion7().ToString("N");
+            updates.Add(new RecordUpdate<TDocument>(candidate.Current.Id, existing =>
+                existing is { IsPushable: true, Pending: null }
+                    ? existing with
+                    {
+                        Pending = new PendingOperation<TDocument>(operationId, existing.LocalRevision, existing.BaseVersion, existing.Current),
+                    }
+                    : null));
         }
-        else
+
+        var results = await _store.UpdateAsync(updates, cancellationToken: cancellationToken).ConfigureAwait(false);
+        var operations = new List<PushOperation<TDocument>>(results.Count);
+        foreach (var result in results)
         {
-            await _store.UpsertAsync(
-                new SyncRecord<TDocument>(_clone(accepted), _clone(accepted), IsDirty: false),
-                cancellationToken).ConfigureAwait(false);
+            if (result.Record is { IsPushable: true, Pending: { } pending } record)
+            {
+                operations.Add(new PushOperation<TDocument>(pending.OperationId, record.Current.Id, pending.BaseVersion, pending.Payload));
+            }
         }
+
+        return operations;
     }
 
-    private async Task ResolveConflictAsync(TDocument realMaster, CancellationToken cancellationToken)
+    private static Dictionary<string, PushOutcome<TDocument>> CorrelateOutcomes(
+        List<PushOperation<TDocument>> operations,
+        PushResult<TDocument>? response)
     {
-        _clock.Update(realMaster.UpdatedAt);
-        var existing = await _store.GetAsync(realMaster.Id, cancellationToken).ConfigureAwait(false);
-
-        // Fork should exist (we pushed it); if it vanished, just adopt the server state.
-        if (existing is null)
+        if (response?.Outcomes is null)
         {
-            await _store.UpsertAsync(
-                new SyncRecord<TDocument>(_clone(realMaster), _clone(realMaster), IsDirty: false),
-                cancellationToken).ConfigureAwait(false);
-            return;
+            throw new SyncProtocolException("The server returned no push result.");
         }
 
-        var context = new ConflictContext<TDocument>(
-            RealMaster: _clone(realMaster),
-            AssumedMaster: existing.Base is { } b ? _clone(b) : null,
-            Fork: _clone(existing.Current));
-
-        var resolution = _conflictHandler.Resolve(context);
-
-        if (resolution.Outcome == ConflictOutcome.UseMaster || resolution.Resolved is null)
+        var sent = operations.ToDictionary(static o => o.OperationId, StringComparer.Ordinal);
+        var outcomes = new Dictionary<string, PushOutcome<TDocument>>(StringComparer.Ordinal);
+        foreach (var outcome in response.Outcomes)
         {
-            await _store.UpsertAsync(
-                new SyncRecord<TDocument>(_clone(realMaster), _clone(realMaster), IsDirty: false),
-                cancellationToken).ConfigureAwait(false);
-            return;
+            if (outcome is null || !sent.TryGetValue(outcome.OperationId, out var operation))
+            {
+                throw new SyncProtocolException($"The server reported an outcome for unknown operation '{outcome?.OperationId}'.");
+            }
+
+            if (!outcomes.TryAdd(outcome.OperationId, outcome))
+            {
+                throw new SyncProtocolException($"The server reported operation '{outcome.OperationId}' twice.");
+            }
+
+            var carriesState = outcome.Kind is PushOutcomeKind.Accepted or PushOutcomeKind.Conflict;
+            if (carriesState
+                && (outcome.Document is null
+                    || outcome.Version is not >= 1
+                    || !string.Equals(outcome.Document.Id, operation.DocumentId, StringComparison.Ordinal)))
+            {
+                throw new SyncProtocolException($"The server returned a malformed {outcome.Kind} outcome for '{outcome.OperationId}'.");
+            }
+
+            if (!Enum.IsDefined(outcome.Kind))
+            {
+                throw new SyncProtocolException($"The server returned an unknown outcome kind for '{outcome.OperationId}'.");
+            }
         }
 
-        // Re-push the resolved document. Stamp it so it causally dominates the server state, and
-        // rebase its assumed-master onto the real master so the re-push is accepted.
-        var resolved = _clone(resolution.Resolved);
-        resolved.Id = realMaster.Id;
-        resolved.UpdatedAt = _clock.Update(realMaster.UpdatedAt);
+        return outcomes;
+    }
 
-        await _store.UpsertAsync(
-            new SyncRecord<TDocument>(resolved, _clone(realMaster), IsDirty: true),
-            cancellationToken).ConfigureAwait(false);
+    private SyncRecord<TDocument>? ApplyAccepted(SyncRecord<TDocument>? existing, string operationId, PushOutcome<TDocument> outcome)
+    {
+        // A stale or duplicate response for an operation that is no longer pending changes nothing.
+        if (existing?.Pending is not { } pending || pending.OperationId != operationId)
+        {
+            return null;
+        }
+
+        var confirmed = outcome.Document!;
+        var rebased = existing with { Base = _clone(confirmed), BaseVersion = outcome.Version, Pending = null };
+
+        // Only the revision that was sent becomes clean; a later local edit stays dirty on the new base.
+        return Settle(existing.LocalRevision == pending.Revision
+            ? rebased with { Current = _clone(confirmed), IsDirty = false, Rejection = null }
+            : rebased);
+    }
+
+    private static SyncRecord<TDocument>? ApplyRejected(SyncRecord<TDocument>? existing, string operationId, PushOutcome<TDocument> outcome)
+    {
+        if (existing?.Pending is not { } pending || pending.OperationId != operationId)
+        {
+            return null;
+        }
+
+        return existing.LocalRevision == pending.Revision
+            ? existing with { Pending = null, Rejection = new SyncRejection(pending.Revision, outcome.ErrorCode ?? "rejected", outcome.Message) }
+            : existing with { Pending = null };
+    }
+
+    /// <summary>Runs the conflict handler and commits its decision; returns whether the record is still pushable.</summary>
+    private async Task<bool> ResolveConflictAsync(string operationId, PushOutcome<TDocument> outcome, CancellationToken cancellationToken)
+    {
+        var master = outcome.Document!;
+        var masterVersion = outcome.Version!.Value;
+        _clock.Update(master.UpdatedAt);
+
+        var snapshot = await _store.GetAsync(master.Id, cancellationToken).ConfigureAwait(false);
+        if (snapshot?.Pending?.OperationId != operationId)
+        {
+            return snapshot?.IsPushable ?? false;
+        }
+
+        var resolution = _conflictHandler.Resolve(new ConflictContext<TDocument>(
+            RealMaster: _clone(master),
+            AssumedMaster: snapshot.Base is { } b ? _clone(b) : null,
+            Fork: _clone(snapshot.Current)));
+
+        TDocument? resolved = null;
+        if (resolution.Outcome == ConflictOutcome.UseResolved)
+        {
+            resolved = _clone(resolution.Resolved ?? throw new InvalidOperationException("A UseResolved resolution must carry a document."));
+            resolved.Id = master.Id;
+            resolved.UpdatedAt = _clock.Update(master.UpdatedAt);
+        }
+
+        var results = await _store.UpdateAsync(
+            [new RecordUpdate<TDocument>(master.Id, existing =>
+            {
+                if (existing?.Pending?.OperationId != operationId)
+                {
+                    return null;
+                }
+
+                if (existing.LocalRevision != snapshot.LocalRevision)
+                {
+                    // Edited while resolving: drop the stale operation but keep the old base, so the
+                    // next push conflicts again and the handler sees the latest local state.
+                    return existing with { Pending = null };
+                }
+
+                var rebased = existing with { Base = _clone(master), BaseVersion = masterVersion, Pending = null };
+                return Settle(resolution.Outcome switch
+                {
+                    ConflictOutcome.UseMaster => rebased with { Current = _clone(master), IsDirty = false, Rejection = null },
+                    ConflictOutcome.KeepFork => rebased with { IsDirty = true },
+                    _ => rebased with { Current = _clone(resolved!), IsDirty = true, LocalRevision = existing.LocalRevision + 1 },
+                });
+            })],
+            cancellationToken: cancellationToken).ConfigureAwait(false);
+
+        return results[0].Record?.IsPushable ?? false;
     }
 }

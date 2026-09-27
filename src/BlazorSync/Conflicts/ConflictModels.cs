@@ -2,17 +2,16 @@ namespace BlazorSync.Conflicts;
 
 /// <summary>
 /// The three document states involved in a conflict, surfaced to an <see cref="IConflictHandler{TDocument}"/>
-/// so it has everything needed to merge.
+/// so it has everything needed to merge. All three are independent copies the handler may mutate.
 /// </summary>
 /// <typeparam name="TDocument">The synchronized entity type.</typeparam>
 /// <param name="RealMaster">The server's current authoritative state.</param>
 /// <param name="AssumedMaster">
-/// The state the client believed was current when it made the local write, or
-/// <see langword="null"/> if the client thought the document was new. The difference between
-/// <paramref name="AssumedMaster"/> and <paramref name="RealMaster"/> is precisely the concurrent
-/// change made elsewhere.
+/// The server state the local edit was based on (the common ancestor), or <see langword="null"/> if
+/// the client thought the document was new. The difference between <paramref name="AssumedMaster"/>
+/// and <paramref name="RealMaster"/> is precisely the concurrent change made elsewhere.
 /// </param>
-/// <param name="Fork">The client's local (losing or winning, depending on strategy) state.</param>
+/// <param name="Fork">The latest local state, including edits made after the conflicting push was sent.</param>
 public sealed record ConflictContext<TDocument>(
     TDocument RealMaster,
     TDocument? AssumedMaster,
@@ -25,8 +24,17 @@ public enum ConflictOutcome
     /// <summary>Discard the local change and accept the server's current state.</summary>
     UseMaster = 0,
 
-    /// <summary>Write a resolved document, which the engine will re-push to the server.</summary>
+    /// <summary>
+    /// Write a new resolved document. It is a new local edit: the engine stamps it with a fresh
+    /// timestamp and re-pushes it based on the server's current version.
+    /// </summary>
     UseResolved = 1,
+
+    /// <summary>
+    /// Keep the local state unchanged, including its original authoring timestamp, and re-push it
+    /// based on the server's current version.
+    /// </summary>
+    KeepFork = 2,
 }
 
 /// <summary>The outcome of resolving a single conflict.</summary>
@@ -52,7 +60,10 @@ public sealed record ConflictResolution<TDocument>
     /// <summary>Discard the local change and keep the server's state.</summary>
     public static ConflictResolution<TDocument> AcceptMaster() => new(ConflictOutcome.UseMaster, null);
 
-    /// <summary>Persist and re-push <paramref name="resolved"/> as the new authoritative state.</summary>
+    /// <summary>Keep the local state (and its authoring timestamp) and re-push it.</summary>
+    public static ConflictResolution<TDocument> KeepFork() => new(ConflictOutcome.KeepFork, null);
+
+    /// <summary>Persist and re-push <paramref name="resolved"/> as a new local edit.</summary>
     public static ConflictResolution<TDocument> Resolve(TDocument resolved)
     {
         ArgumentNullException.ThrowIfNull(resolved);
@@ -61,10 +72,13 @@ public sealed record ConflictResolution<TDocument>
 }
 
 /// <summary>
-/// Resolves conflicts detected during push. Implementations run entirely on the client, keeping the
-/// server logic minimal. Provide a custom implementation to merge fields, prompt the user, or apply
-/// domain-specific rules.
+/// Resolves conflicts detected during push. Implementations run on the client.
 /// </summary>
+/// <remarks>
+/// A handler must be deterministic for its inputs and free of external side effects: the engine may
+/// call it again for the same document if the conflict recurs, and it must never be the only record
+/// of user intent. Provide a custom implementation to merge fields or apply domain rules.
+/// </remarks>
 /// <typeparam name="TDocument">The synchronized entity type.</typeparam>
 public interface IConflictHandler<TDocument>
     where TDocument : class, ISyncEntity

@@ -1,69 +1,107 @@
 # BlazorSync
 
-Platform-independent, local-first sync protocol with change tracking and conflict resolution for Blazor (WebAssembly, Hybrid, and native .NET).
+Local-first document replication for .NET and Blazor: local writes that never wait for the network,
+change tracking, retry-safe push, checkpointed pull and pluggable conflict resolution.
 
-BlazorSync implements an RxDB-style replication protocol in C#. All of the protocol logic — checkpoint iteration, change tracking, and conflict resolution — lives on the client, so storage backends and the server stay deliberately simple ("complexity in the client, dumb backend"). Writes are causally ordered with a Hybrid Logical Clock, deletions are soft so they replicate, and the server is always authoritative over write timestamps.
-
+> **Status: pre-1.0 prototype.** The protocol engine, clock and conflict handling are tested in-process.
+> There is no durable store, HTTP transport, persistent server or authorization yet, so it is not ready
+> for production data. See [docs/support-matrix.md](docs/support-matrix.md) and [docs/roadmap.md](docs/roadmap.md).
 > Targets `net10.0`.
 
-## Why local-first
+## What it guarantees today
 
-- **Offline by default.** All reads and writes hit a local store. Sync happens opportunistically in the background.
-- **Causal ordering without trusted clocks.** A Hybrid Logical Clock (HLC) produces strictly monotonic, totally-ordered timestamps that stay meaningful even when device clocks drift, giving deterministic conflict resolution across devices.
-- **Pluggable everything.** The engine depends only on three abstractions — a local store, a transport, and a conflict handler — so you can swap SQLite, IndexedDB/OPFS, HTTP, or an in-process server without touching protocol code.
+Precisely, and only for the in-memory reference store and authority (details in
+[docs/architecture/invariants.md](docs/architecture/invariants.md)):
+
+- **Atomic local writes.** A write and its pending upload commit together and never wait for the network.
+- **No lost local edits.** An acknowledgement, pull or conflict resolution never overwrites or marks clean
+  a local edit made while the network call was in flight.
+- **Retry-safe pushes.** Each write becomes an operation with a persisted id and immutable payload. If a
+  response is lost, the same operation is resent and the server replays its original outcome.
+- **Per-document optimistic concurrency.** The server accepts a write only if it was based on the current
+  version; otherwise it returns a conflict for the client's handler.
+- **Atomic, monotone pull.** A page and its checkpoint commit together; older versions never replace newer
+  ones.
+- **Bounded, honest runs.** Batch and retry budgets are enforced, and `SyncResult.IsComplete` says whether
+  work remains.
+
+It does **not** provide cross-document transactions, causal consistency, live notifications, offline
+execution for purely server-rendered UI, or schema migration yet.
 
 ## Project layout
 
 ```
-BlazorSync.slnx
-├── src/BlazorSync            The protocol library (engine, clock, conflicts, storage/transport contracts)
-├── samples/BlazorSync.Demo        Blazor WebAssembly multi-device playground
-└── tests/BlazorSync.Tests    xUnit tests for the clock, conflicts, and sync engine
+src/BlazorSync.slnx                 Solution
+src/BlazorSync/                     Protocol library (engine, clock, conflicts, storage/transport contracts,
+                                    in-memory reference store and authority)
+src/BlazorSync.Tests/               xUnit tests: unit, regression, fault injection, seeded randomized convergence
+src/BlazorSync.Demo/                Blazor WebAssembly playground simulating several devices in one tab
+docs/                               Baseline review, architecture decisions, invariants, roadmap, compatibility
 ```
 
 ## How it works
 
-A `SyncEngine<TDocument>` orchestrates replication of a single collection between a local store and a server transport. Every synchronized type implements `ISyncEntity`, which carries the minimal metadata the protocol needs:
+A `SyncEngine<TDocument>` replicates one collection between a local store and a server transport.
+Entities implement `ISyncEntity`:
 
 ```csharp
 public interface ISyncEntity
 {
-    string Id { get; set; }            // stable, globally unique key (e.g. a GUIDv7 assigned on create)
-    HlcTimestamp UpdatedAt { get; set; } // HLC timestamp of the last write; also the sync cursor
-    bool Deleted { get; set; }          // soft-delete flag so deletions replicate
+    string Id { get; set; }              // stable, globally unique key (e.g. GUIDv7 assigned on create)
+    HlcTimestamp UpdatedAt { get; set; } // origin timestamp: when/where the current state was authored
+    bool Deleted { get; set; }           // soft-delete flag so deletions replicate
 }
 ```
 
+Replication metadata lives in the store's `SyncRecord<T>` envelope, not on the entity:
+
+| Metadata | Meaning |
+|---|---|
+| `LocalRevision` | Incremented by every local write; decides whether an acknowledgement still applies. |
+| `Pending` | The persisted operation (id, revision, base version, immutable payload) being sent. |
+| `Base`, `BaseVersion` | Last confirmed server state and its server version (the concurrency token). |
+| `Rejection` | Set when the server permanently rejected a revision; the record is parked until edited again. |
+| Checkpoint | Opaque server-issued feed position (per store). |
+
 ### Local writes
 
-`WriteAsync` and `DeleteAsync` stamp the document with a fresh HLC timestamp, mark it dirty (queued for push), and preserve the last-known server baseline so a future conflict can be detected against it. Deletions are soft: the record is retained with `Deleted = true`.
+`WriteAsync` stores a copy of the document stamped with a fresh HLC timestamp and returns a
+`LocalWriteReceipt`. `DeleteAsync` stores a tombstone. Both are atomic compare-and-transform operations
+on the store and never wait for replication.
 
-### Pull (catch-up)
+### Pull
 
-`PullAsync` repeatedly fetches batches strictly after the stored `Checkpoint` and applies them until the server reports no more changes. Records are ordered deterministically by `(UpdatedAt, Id)`, so a peer resumes from exactly where it left off with no gaps or duplicates. Dirty local records are left untouched — their divergence surfaces during the next push.
+`PullAsync` asks for changes after the stored checkpoint and applies each page together with its new
+checkpoint in one atomic store update. Records with unconfirmed local changes keep their local state; the
+newer server state is remembered and the divergence is resolved on push.
 
-### Push (send and resolve)
+### Push
 
-`PushAsync` sends dirty records, each carrying the `AssumedMaster` (the server state the client believed was current) alongside the new state. The server accepts the write only if the assumed master still matches its current version; otherwise it returns the real master as a conflict. Accepted writes adopt the server-stamped timestamp; conflicts are resolved by the configured `IConflictHandler<TDocument>`. Because a resolution can produce a merged document that must itself be pushed, push runs multiple passes until the queue drains (bounded by `SyncOptions.MaxPushPasses`).
+`PushAsync` drains the pending queue in batches. For each record it first persists an operation with a
+new id, then sends it with the base version it was made against. Each operation gets its own outcome:
 
-`SyncAsync` runs a full cycle: pull, then push, returning an aggregate `SyncResult` (pulled / pushed / conflicts).
+- **Accepted**: the record adopts the server version, unless it was edited again meanwhile, in which case
+  the later edit stays pending on the new base.
+- **Conflict**: the configured `IConflictHandler<T>` decides.
+- **Rejected**: the record is parked with `SyncRecord.Rejection` and does not block other records.
+- **Retry later** or no outcome: the operation stays pending and is resent with the same id.
+
+`SyncAsync` runs pull then push. Replication on one engine is single-flight.
 
 ### Conflict handlers
 
-The engine ships with several built-in strategies (all in `BlazorSync.Conflicts`):
-
-| Handler | Behavior |
+| Handler | Behaviour |
 | --- | --- |
-| `ClientWinsConflictHandler<T>` | **Default.** Local change wins and is re-pushed over the concurrent server change. |
-| `ServerWinsConflictHandler<T>` | Server's current state wins; conflicting local changes are discarded. |
-| `LastWriteWinsConflictHandler<T>` | Greater `UpdatedAt` wins (deterministic via HLC total order); ties fall back to the server. |
-| `DelegateConflictHandler<T>` | Wraps a `Func<ConflictContext<T>, ConflictResolution<T>>` for custom/field-level merges. |
+| `ClientWinsConflictHandler<T>` | **Default.** Local change is re-pushed over the concurrent server change (the remote edit is lost). |
+| `ServerWinsConflictHandler<T>` | Server state wins; the conflicting local change is discarded. |
+| `LastWriteWinsConflictHandler<T>` | The later *authoring* timestamp wins, independent of upload order. Depends on roughly synchronized clocks. |
+| `DelegateConflictHandler<T>` | Wraps a function for custom merges. |
 
-A handler receives the `RealMaster` (server state), the `AssumedMaster` (what the client thought was current), and the `Fork` (local state), and returns either `AcceptMaster()` or `Resolve(merged)`.
+A handler receives copies of `RealMaster` (server current), `AssumedMaster` (the base of the local edit)
+and `Fork` (latest local state) and returns `AcceptMaster()`, `KeepFork()` or `Resolve(merged)`. Handlers
+must be deterministic and side-effect free; they never run for a replayed outcome.
 
 ## Getting started
-
-Reference the core project and wire up an engine. The example below uses the included in-memory store and in-process server, which is also how the test suite runs.
 
 ```csharp
 using BlazorSync;
@@ -72,33 +110,28 @@ using BlazorSync.Conflicts;
 using BlazorSync.Server;
 using BlazorSync.Storage;
 
-// 1. A node-unique clock (use a stable, persisted id per device/installation).
+// 1. A clock with a stable, persisted, per-replica node id ([A-Za-z0-9._~-], up to 64 chars).
 var clock = new HybridLogicalClock(node: "device-a");
 
-// 2. Local store + a transport to the server.
-var store  = new InMemoryLocalStore<Note>();
+// 2. Local store + a transport to the server (in-memory reference implementations).
+var store = new InMemoryLocalStore<Note>();
 var server = new InMemorySyncServer<Note>();
 var transport = new InProcessTransport<Note>(server);
 
 // 3. The engine.
-var engine = new SyncEngine<Note>(
-    store,
-    transport,
-    clock,
+var engine = new SyncEngine<Note>(store, transport, clock,
     conflictHandler: new LastWriteWinsConflictHandler<Note>());
 
-// 4. Local-first writes.
-await engine.WriteAsync(new Note { Title = "Hello", Body = "world" });
+// 4. Local-first writes (committed locally, queued for upload).
+LocalWriteReceipt receipt = await engine.WriteAsync(new Note { Title = "Hello", Body = "world" });
 
-// 5. Sync (pull + push) when connectivity allows.
+// 5. Sync when connectivity allows, and check whether everything was done.
 SyncResult result = await engine.SyncAsync();
-// result.Pulled / result.Pushed / result.Conflicts
+if (!result.IsComplete) { /* work remains: deferred, rejected or over budget */ }
 
 // 6. Read what the app sees.
 IReadOnlyList<Note> notes = await engine.QueryAsync();
 ```
-
-### Building your own entity
 
 ```csharp
 public sealed class Note : ISyncEntity
@@ -114,40 +147,65 @@ public sealed class Note : ISyncEntity
 
 ## Trimming and AOT (Blazor WebAssembly)
 
-The engine, in-memory store, and in-memory server default to a reflection-based `System.Text.Json` deep clone (`DocumentCloner.JsonClone`) to keep the "current" and "base" states isolated. That default is **not** trim/AOT-safe. For published WebAssembly builds, supply a hand-written `Cloner` via `SyncOptions<T>` (and to the store/server constructors). The demo's `DemoNote.Clone()` shows the recommended pattern:
+The engine, in-memory store and in-memory server default to reflection-based `System.Text.Json` for
+cloning (and, on the server, for operation fingerprints). That default is **not** trim/AOT-safe. For
+published WebAssembly builds supply explicit delegates, as the demo does:
 
 ```csharp
 var options = new SyncOptions<DemoNote> { Cloner = doc => doc.Clone() };
 var engine = new SyncEngine<DemoNote>(store, transport, clock, options: options);
+
+var server = new InMemorySyncServer<DemoNote>(new InMemorySyncServerOptions<DemoNote>
+{
+    Cloner = n => n.Clone(),
+    Fingerprint = DemoJsonContext.Fingerprint, // source-generated JSON
+});
 ```
 
 ## Hybrid Logical Clock
 
-`HlcTimestamp(WallTime, Counter, Node)` combines a physical wall-clock component (Unix ms) with a monotonic logical counter and a node id. Timestamps are totally ordered (wall time, then counter, then node) and `Encode()`/`Parse()` round-trip to a lexicographically sortable string — usable directly as a sortable DB column and as a checkpoint cursor. `HybridLogicalClock` is thread-safe: call `Now()` for local events and `Update(remote)` when receiving a peer timestamp.
+`HlcTimestamp(WallTime, Counter, Node)` is validated on construction (wall time ≤ 15 digits, counter ≤
+999,999, ASCII node alphabet), so numeric order and the ordinal order of `Encode()` always agree.
+`HybridLogicalClock` is thread-safe and strictly monotonic; counter overflow carries into wall time.
+The engine seeds its clock from the store's high-water mark before its first write, so timestamps are not
+reused after a restart. The server validates that timestamps are not too far in the future and never
+re-stamps them.
 
 ## The demo
 
-`samples/BlazorSync.Demo` is a Blazor WebAssembly playground that runs multiple virtual "devices" in the browser, each with its own engine and clock, all talking to a shared in-process server. It includes:
+`src/BlazorSync.Demo` is a Blazor WebAssembly playground that simulates several devices in one browser
+tab, each with its own engine and clock, talking to one in-process server. Nothing is persisted.
 
-- **Playground** (`/playground`) — create/edit/delete notes per device and watch them sync.
-- **Conflict Lab** (`/conflicts`) — force concurrent edits and switch conflict strategies to see resolution in action.
-- **Clock Explorer** (`/clock`) — visualize HLC timestamp generation.
-
-Run it:
+- **Playground** (`/playground`): create, edit and delete notes per device; toggle devices offline.
+- **Conflict Lab** (`/conflicts`): force concurrent edits and compare conflict strategies.
+- **Clock Explorer** (`/clock`): visualize HLC timestamp generation.
 
 ```bash
-dotnet run --project samples/BlazorSync.Demo
+dotnet run --project src/BlazorSync.Demo
 ```
 
 ## Building and testing
 
 ```bash
-dotnet build
-dotnet test
+dotnet build src/BlazorSync.slnx -c Release
+dotnet test src/BlazorSync.slnx -c Release
+dotnet publish src/BlazorSync.Demo -c Release                              # optional
+dotnet publish src/BlazorSync.Demo -c Release -p:RunAOTCompilation=true    # needs the wasm-tools workload
 ```
 
-The test suite (`tests/BlazorSync.Tests`) covers the Hybrid Logical Clock, the built-in conflict handlers, and end-to-end sync engine scenarios using a `ManualClock` for deterministic timestamps.
+Test display names carry invariant (`I04`) and catalogue (`T11`) ids, for example:
 
-## Status
+```bash
+dotnet test src/BlazorSync.slnx --filter "DisplayName~I04"
+```
 
-The in-memory server documents the contract a real backend must honor; an EF Core–backed server over an arbitrary database is planned. Live change streaming (`ISyncTransport.StreamAsync` / `StreamEvent`) is defined but not yet implemented for the in-process transport — until then, clients use checkpoint-iteration pull.
+## Documentation
+
+- [Baseline review](docs/review/baseline.md): reproduced defects and what changed.
+- [Architecture decisions and invariants](docs/architecture/README.md).
+- [Compatibility policy and migration notes](docs/compatibility.md).
+- [Support matrix](docs/support-matrix.md) and [roadmap](docs/roadmap.md).
+
+## License
+
+MIT. See [LICENSE](LICENSE).
