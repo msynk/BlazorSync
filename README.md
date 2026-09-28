@@ -39,30 +39,33 @@ server-rendered UI.
 ## Project layout
 
 ```
-src/Bsync.slnx                 Solution
-src/Bsync/                     Protocol library (engine, clock, conflicts, storage/transport contracts,
-                               in-memory reference store and authority)
-src/Bsync.Storage.Sqlite/      Durable SQLite store for native hosts (MAUI, WPF, WinForms, console)
-src/Bsync.Server.AspNetCore/   ASP.NET Core endpoints for the protocol over any ISyncAuthority
-src/Bsync.Server.PostgreSql/   Durable PostgreSQL authority (Npgsql)
-src/Bsync.Transport.Http/      HTTP client transport (browser and native)
-src/Bsync.Storage.IndexedDb/   Durable browser store (IndexedDB) with a multi-tab replication lease
-src/Bsync.Testing/             Provider conformance cases (framework-free; also run in browsers)
-src/Bsync.Blazor/              Blazor integration: ISyncCollection, local session, server-connected collection
-src/Bsync.Samples.Shared/      Note model + NotesPanel component shared by the samples
-src/Bsync.Samples.Notes.*      Offline-capable notes PWA: ASP.NET Core server + WebAssembly client
-src/Bsync.Samples.WebApp*      Blazor Web App: one component in static SSR, Server, WebAssembly and Auto
-src/Bsync.Samples.Hybrid.Wpf/  WPF Blazor Hybrid app: SQLite replica, same NotesPanel
-src/Bsync.Samples.Hybrid.Maui/ .NET MAUI Blazor Hybrid app (Windows target; needs the maui-windows workload)
-src/Bsync.Tests.PostgreSql/    Authority conformance and PostgreSQL-specific tests (needs BSYNC_POSTGRES)
-src/Bsync.Tests.Browser/       Playwright tests (Chromium, Firefox, WebKit) and their WASM harness
-src/Bsync.Tests/               xUnit tests: unit, regression, provider conformance, wire fixtures,
-                               fault injection, process-kill, seeded randomized convergence
-src/Bsync.Tests.CrashHost/     Helper process the tests kill mid-write
-src/Bsync.Benchmarks/          BenchmarkDotNet workloads (docs/benchmarks.md)
-src/api/                       Public API baselines checked by PublicApiTests
-src/Bsync.Demo/                Blazor WebAssembly playground simulating several devices in one tab
-docs/                          Baseline review, architecture decisions, invariants, roadmap, compatibility
+src/Bsync.slnx                          Solution
+src/Bsync/                              Library projects (the packages)
+src/Bsync/Bsync/                        Protocol library (engine, clock, conflicts, storage/transport contracts,
+                                        in-memory reference store and authority)
+src/Bsync/Bsync.Storage.Sqlite/         Durable SQLite store for native hosts (MAUI, WPF, WinForms, console)
+src/Bsync/Bsync.Server.AspNetCore/      ASP.NET Core endpoints for the protocol over any ISyncAuthority
+src/Bsync/Bsync.Server.PostgreSql/      Durable PostgreSQL authority (Npgsql)
+src/Bsync/Bsync.Transport.Http/         HTTP client transport (browser and native)
+src/Bsync/Bsync.Storage.IndexedDb/      Durable browser store (IndexedDB) with a multi-tab replication lease
+src/Bsync/Bsync.Testing/                Provider conformance cases (framework-free; also run in browsers)
+src/Bsync/Bsync.Blazor/                 Blazor integration: ISyncCollection, local session, server-connected collection
+src/Samples/                            Samples and the demo
+src/Samples/Bsync.Samples.Shared/       Note model + NotesPanel component shared by the samples
+src/Samples/Bsync.Samples.Notes.*       Offline-capable notes PWA: ASP.NET Core server + WebAssembly client
+src/Samples/Bsync.Samples.WebApp*       Blazor Web App: one component in static SSR, Server, WebAssembly and Auto
+src/Samples/Bsync.Samples.Hybrid.Wpf/   WPF Blazor Hybrid app: SQLite replica, same NotesPanel
+src/Samples/Bsync.Samples.Hybrid.Maui/  .NET MAUI Blazor Hybrid app (Windows target; needs the maui-windows workload)
+src/Samples/Bsync.Demo/                 Blazor WebAssembly playground simulating several devices in one tab
+src/Tests/                              Tests, test hosts and benchmarks
+src/Tests/Bsync.Tests/                  xUnit tests: unit, regression, provider conformance, wire fixtures,
+                                        fault injection, process-kill, seeded randomized convergence
+src/Tests/Bsync.Tests.PostgreSql/       Authority conformance and PostgreSQL-specific tests (needs BSYNC_POSTGRES)
+src/Tests/Bsync.Tests.Browser/          Playwright tests (Chromium, Firefox, WebKit) and their WASM harness
+src/Tests/Bsync.Tests.CrashHost/        Helper process the tests kill mid-write
+src/Tests/Bsync.Benchmarks/             BenchmarkDotNet workloads (docs/benchmarks.md)
+src/Tests/api/                          Public API baselines checked by PublicApiTests
+docs/                                   Baseline review, architecture decisions, invariants, roadmap, compatibility
 ```
 
 ## How it works
@@ -260,7 +263,7 @@ builder.Services.AddBrowserSyncCollection<Note>("notes", AppJson.Default.Note,
 `Status` reports `Synced`, `Syncing`, `Offline`, `Follower`, `Paused`, `AttentionRequired` and so on, and
 `GetItemStatusAsync(id)` tells whether one document is still pending, rejected or conflicted.
 `GetConflictsAsync`, `ResolveConflictAsync` and `DiscardConflictAsync` expose kept conflicts to components
-(the samples' `NotesPanel` offers "Keep mine" / "Keep theirs"). See `src/Bsync.Samples.WebApp` for all
+(the samples' `NotesPanel` offers "Keep mine" / "Keep theirs"). See `src/Samples/Bsync.Samples.WebApp` for all
 four render modes side by side.
 
 Browser sessions sync after each local write, when the browser comes back online or the tab becomes visible,
@@ -282,7 +285,7 @@ await using var lease = await IndexedDbReplicaLease.TryAcquireAsync(jsRuntime, $
 Open it only once the WebAssembly runtime is interactive (never during prerendering). Writes from several
 tabs are safe: every update commits in one IndexedDB transaction and only if no other tab changed the same
 records first. Failures (IndexedDB missing, quota, an upgrade from another tab) surface as
-`LocalStoreUnavailableException`. See `src/Bsync.Samples.Notes.Client` for a complete offline PWA.
+`LocalStoreUnavailableException`. See `src/Samples/Bsync.Samples.Notes.Client` for a complete offline PWA.
 
 ## Server restores, access changes and retention
 
@@ -328,11 +331,11 @@ app.MapSyncCollection("notes", authority, json, endpointOptions).RequireAuthoriz
   `LISTEN`/`NOTIFY`.
 - After restoring a backup, call `BeginNewEpochAsync(versionFloor)`. For retention, use `PurgeTombstonesAsync`
   and `PurgeReceiptsAsync`.
-- Tests: `BSYNC_POSTGRES="Host=...;Username=...;Password=..." dotnet test src/Bsync.Tests.PostgreSql`.
+- Tests: `BSYNC_POSTGRES="Host=...;Username=...;Password=..." dotnet test src/Tests/Bsync.Tests.PostgreSql`.
 
 ## Native apps (WPF, .NET MAUI)
 
-`src/Bsync.Samples.Hybrid.Wpf` and `src/Bsync.Samples.Hybrid.Maui` host the same `NotesPanel` in a
+`src/Samples/Bsync.Samples.Hybrid.Wpf` and `src/Samples/Bsync.Samples.Hybrid.Maui` host the same `NotesPanel` in a
 `BlazorWebView`, with a SQLite replica registered through `AddLocalSyncCollection`. Sync pauses while the window
 is minimized or the app is in the background. Both have a `--smoke` mode that the tests use to drive the real UI.
 
@@ -422,7 +425,7 @@ re-stamps them.
 
 ## The demo
 
-`src/Bsync.Demo` is a Blazor WebAssembly playground that simulates several devices in one browser
+`src/Samples/Bsync.Demo` is a Blazor WebAssembly playground that simulates several devices in one browser
 tab, each with its own engine and clock, talking to one in-process server. Nothing is persisted.
 
 - **Playground** (`/playground`): create, edit and delete notes per device; toggle devices offline.
@@ -430,17 +433,17 @@ tab, each with its own engine and clock, talking to one in-process server. Nothi
 - **Clock Explorer** (`/clock`): visualize HLC timestamp generation.
 
 ```bash
-dotnet run --project src/Bsync.Demo
+dotnet run --project src/Samples/Bsync.Demo
 ```
 
 ## Building and testing
 
 ```bash
 dotnet build src/Bsync.slnx -c Release
-dotnet test src/Bsync.Tests -c Release                      # unit, conformance, HTTP, Blazor, recovery
-BSYNC_POSTGRES="Host=localhost;Username=postgres;Password=..." dotnet test src/Bsync.Tests.PostgreSql -c Release
-dotnet publish src/Bsync.Demo -c Release                              # optional
-dotnet publish src/Bsync.Demo -c Release -p:RunAOTCompilation=true    # needs the wasm-tools workload
+dotnet test src/Tests/Bsync.Tests -c Release                      # unit, conformance, HTTP, Blazor, recovery
+BSYNC_POSTGRES="Host=localhost;Username=postgres;Password=..." dotnet test src/Tests/Bsync.Tests.PostgreSql -c Release
+dotnet publish src/Samples/Bsync.Demo -c Release                              # optional
+dotnet publish src/Samples/Bsync.Demo -c Release -p:RunAOTCompilation=true    # needs the wasm-tools workload
 ```
 
 Browser and desktop tests (download Playwright's Chromium, Firefox and WebKit on first run, about 500 MB). They
@@ -448,16 +451,16 @@ also run the WPF sample on Windows, the MAUI sample with `-p:BuildMauiSample=tru
 PostgreSQL test when `BSYNC_POSTGRES` is set:
 
 ```bash
-dotnet test src/Bsync.Tests.Browser -c Release
-dotnet test src/Bsync.Tests.Browser -c Release -p:BrowserHostAot=true   # same tests, WebAssembly AOT build
+dotnet test src/Tests/Bsync.Tests.Browser -c Release
+dotnet test src/Tests/Bsync.Tests.Browser -c Release -p:BrowserHostAot=true   # same tests, WebAssembly AOT build
 ```
 
-A change to a package's public API fails `PublicApiTests` until the baseline in `src/api` is regenerated on purpose
-(`BSYNC_UPDATE_API=1 dotnet test src/Bsync.Tests --filter PublicApiTests`) and reviewed. `dotnet pack` builds
+A change to a package's public API fails `PublicApiTests` until the baseline in `src/Tests/api` is regenerated on purpose
+(`BSYNC_UPDATE_API=1 dotnet test src/Tests/Bsync.Tests --filter PublicApiTests`) and reviewed. `dotnet pack` builds
 the seven library packages (`0.1.0-preview`); nothing is published from this repository's tooling.
 CI: `.github/workflows/ci.yml` (Windows, Linux and macOS unit tests, browser tests, pack).
 
-Run the notes sample: `dotnet run --project src/Bsync.Samples.Notes.Server` (the offline service worker
+Run the notes sample: `dotnet run --project src/Samples/Bsync.Samples.Notes.Server` (the offline service worker
 is active only in a published build).
 
 Test display names carry invariant (`I04`) and catalogue (`T11`) ids, for example:

@@ -31,7 +31,7 @@
 | **Behaviour:** an unexpected exception in the session loop (a store, serializer or application failure) now reports `AttentionRequired`, is logged, and is retried after `MaxBackoff` or on `RequestSync`. Before, it ended the loop silently and the status stayed `Syncing`. | Found while adding logging. | None; apps that watched for a stuck `Syncing` state can rely on `AttentionRequired`. |
 | **Behaviour:** an unexpected exception from the authority in `MapSyncCollection` endpoints is answered with `503` and code `unavailable`, and logged. Before, it propagated to the host (usually a bare 500). `SyncEndpoints.MeterName` added. | Clients retry `unavailable`; details stay in server logs. | Authorities that relied on exception middleware to shape responses map their errors to `SyncTransportException` instead. |
 | Package metadata for the seven libraries (`src/Directory.Build.props` and `.targets`): version `0.1.0-preview`, MIT, repository links, README, symbols (snupkg), deterministic builds. The demo, samples, tests and benchmarks are not packable. | Phase 10 packaging. Nothing is published. | None. |
-| Public API baselines in `src/api/*.txt`, checked by `PublicApiTests`. | API review (ADR-011). | Update with `BSYNC_UPDATE_API=1` after review. |
+| Public API baselines in `src/Tests/api/*.txt`, checked by `PublicApiTests`. | API review (ADR-011). | Update with `BSYNC_UPDATE_API=1` after review. |
 
 ## Unreleased (Phase 9: recovery)
 

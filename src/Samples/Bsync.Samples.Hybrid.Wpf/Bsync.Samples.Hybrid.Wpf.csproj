@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>Bsync.Samples.Hybrid.Wpf</RootNamespace>
+    <Description>Sample: a WPF Blazor Hybrid app with a durable SQLite replica synced over HTTP, running the same NotesPanel as the web samples.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebView.Wpf" Version="10.0.110" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Bsync.Samples.Shared\Bsync.Samples.Shared.csproj" />
+    <ProjectReference Include="..\..\Bsync\Bsync.Storage.Sqlite\Bsync.Storage.Sqlite.csproj" />
+    <ProjectReference Include="..\..\Bsync\Bsync.Transport.Http\Bsync.Transport.Http.csproj" />
+  </ItemGroup>
+
+</Project>

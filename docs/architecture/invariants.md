@@ -7,7 +7,7 @@ check (`I02`, `T06`, …) in their display names, so `dotnet test --filter "Disp
 
 - **Enforced (reference)**: implemented and tested with the in-memory store and in-memory authority.
   Durable providers must pass the same tests, including the conformance suites in
-  `src/Bsync.Tests/Conformance`, before they can claim it.
+  `src/Tests/Bsync.Tests/Conformance`, before they can claim it.
 - **Partial**: some of the invariant is implemented; the gap is stated.
 - **Open**: not implemented yet. The roadmap phase that owns it is given.
 

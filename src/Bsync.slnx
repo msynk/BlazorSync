@@ -1,29 +1,29 @@
 <Solution>
-  <Folder Name="/samples/">
-    <Project Path="Bsync.Demo/Bsync.Demo.csproj" />
-    <Project Path="Bsync.Samples.Hybrid.Wpf/Bsync.Samples.Hybrid.Wpf.csproj" />
-    <Project Path="Bsync.Samples.Notes.Client/Bsync.Samples.Notes.Client.csproj" />
-    <Project Path="Bsync.Samples.Notes.Server/Bsync.Samples.Notes.Server.csproj" />
-    <Project Path="Bsync.Samples.Shared/Bsync.Samples.Shared.csproj" />
-    <Project Path="Bsync.Samples.WebApp.Client/Bsync.Samples.WebApp.Client.csproj" />
-    <Project Path="Bsync.Samples.WebApp/Bsync.Samples.WebApp.csproj" />
+  <Folder Name="/Bsync/">
+    <Project Path="Bsync/Bsync.Blazor/Bsync.Blazor.csproj" />
+    <Project Path="Bsync/Bsync.Server.AspNetCore/Bsync.Server.AspNetCore.csproj" />
+    <Project Path="Bsync/Bsync.Server.PostgreSql/Bsync.Server.PostgreSql.csproj" />
+    <Project Path="Bsync/Bsync.Storage.IndexedDb/Bsync.Storage.IndexedDb.csproj" />
+    <Project Path="Bsync/Bsync.Storage.Sqlite/Bsync.Storage.Sqlite.csproj" />
+    <Project Path="Bsync/Bsync.Testing/Bsync.Testing.csproj" />
+    <Project Path="Bsync/Bsync.Transport.Http/Bsync.Transport.Http.csproj" />
+    <Project Path="Bsync/Bsync/Bsync.csproj" />
   </Folder>
-  <Folder Name="/src/">
-    <Project Path="Bsync.Blazor/Bsync.Blazor.csproj" />
-    <Project Path="Bsync.Server.AspNetCore/Bsync.Server.AspNetCore.csproj" />
-    <Project Path="Bsync.Server.PostgreSql/Bsync.Server.PostgreSql.csproj" />
-    <Project Path="Bsync.Storage.IndexedDb/Bsync.Storage.IndexedDb.csproj" />
-    <Project Path="Bsync.Storage.Sqlite/Bsync.Storage.Sqlite.csproj" />
-    <Project Path="Bsync.Testing/Bsync.Testing.csproj" />
-    <Project Path="Bsync.Transport.Http/Bsync.Transport.Http.csproj" />
-    <Project Path="Bsync/Bsync.csproj" />
+  <Folder Name="/Samples/">
+    <Project Path="Samples/Bsync.Demo/Bsync.Demo.csproj" />
+    <Project Path="Samples/Bsync.Samples.Hybrid.Wpf/Bsync.Samples.Hybrid.Wpf.csproj" />
+    <Project Path="Samples/Bsync.Samples.Notes.Client/Bsync.Samples.Notes.Client.csproj" />
+    <Project Path="Samples/Bsync.Samples.Notes.Server/Bsync.Samples.Notes.Server.csproj" />
+    <Project Path="Samples/Bsync.Samples.Shared/Bsync.Samples.Shared.csproj" />
+    <Project Path="Samples/Bsync.Samples.WebApp.Client/Bsync.Samples.WebApp.Client.csproj" />
+    <Project Path="Samples/Bsync.Samples.WebApp/Bsync.Samples.WebApp.csproj" />
   </Folder>
-  <Folder Name="/tests/">
-    <Project Path="Bsync.Benchmarks/Bsync.Benchmarks.csproj" />
-    <Project Path="Bsync.Tests.Browser/Bsync.Tests.Browser.csproj" />
-    <Project Path="Bsync.Tests.BrowserHost/Bsync.Tests.BrowserHost.csproj" />
-    <Project Path="Bsync.Tests.CrashHost/Bsync.Tests.CrashHost.csproj" />
-    <Project Path="Bsync.Tests.PostgreSql/Bsync.Tests.PostgreSql.csproj" />
-    <Project Path="Bsync.Tests/Bsync.Tests.csproj" />
+  <Folder Name="/Tests/">
+    <Project Path="Tests/Bsync.Benchmarks/Bsync.Benchmarks.csproj" />
+    <Project Path="Tests/Bsync.Tests.Browser/Bsync.Tests.Browser.csproj" />
+    <Project Path="Tests/Bsync.Tests.BrowserHost/Bsync.Tests.BrowserHost.csproj" />
+    <Project Path="Tests/Bsync.Tests.CrashHost/Bsync.Tests.CrashHost.csproj" />
+    <Project Path="Tests/Bsync.Tests.PostgreSql/Bsync.Tests.PostgreSql.csproj" />
+    <Project Path="Tests/Bsync.Tests/Bsync.Tests.csproj" />
   </Folder>
 </Solution>
