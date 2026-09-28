@@ -1,4 +1,4 @@
-using Bsync.Blazor;
+using Bsync.Client;
 using Bsync.Samples.Shared;
 
 namespace Bsync.Samples.Hybrid.Maui;

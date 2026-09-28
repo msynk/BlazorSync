@@ -1,5 +1,5 @@
 using System.Text.Json.Serialization.Metadata;
-using Bsync.Blazor;
+using Bsync.Client;
 using Bsync.Documents;
 using Bsync.Transport;
 using Microsoft.Extensions.DependencyInjection;

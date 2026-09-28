@@ -49,7 +49,9 @@ src/Bsync/Bsync.Server.PostgreSql/      Durable PostgreSQL authority (Npgsql)
 src/Bsync/Bsync.Transport.Http/         HTTP client transport (browser and native)
 src/Bsync/Bsync.Storage.IndexedDb/      Durable browser store (IndexedDB) with a multi-tab replication lease
 src/Bsync/Bsync.Testing/                Provider conformance cases (framework-free; also run in browsers)
-src/Bsync/Bsync.Blazor/                 Blazor integration: ISyncCollection, local session, server-connected collection
+src/Bsync/Bsync.Client/                 UI-independent client: ISyncCollection, local session loop, AddLocalSyncCollection
+                                        (Blazor WebAssembly/Hybrid, MAUI, WPF, WinForms, Avalonia, console)
+src/Bsync/Bsync.Blazor/                 Blazor server integration: server-connected collection, AddServerSyncCollection
 src/Samples/                            Samples and the demo
 src/Samples/Bsync.Samples.Shared/       Note model + NotesPanel component shared by the samples
 src/Samples/Bsync.Samples.Notes.*       Offline-capable notes PWA: ASP.NET Core server + WebAssembly client

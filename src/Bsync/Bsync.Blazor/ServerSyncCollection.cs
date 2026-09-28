@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Bsync.Client;
 using Bsync.Clocks;
 using Bsync.Protocol;
 using Bsync.Server;
@@ -121,7 +122,7 @@ public sealed class ServerSyncCollection<TDocument> : ISyncCollection<TDocument>
             after = page[^1].Document.Id;
         }
 
-        return Queries.Apply(documents, query);
+        return (query ?? new SyncQuery<TDocument>()).Apply(documents);
     }
 
     /// <inheritdoc />
@@ -307,4 +308,12 @@ public sealed class ServerSyncCollection<TDocument> : ISyncCollection<TDocument>
             }
         }
     }
+}
+
+/// <summary>Runs an action once on dispose.</summary>
+internal sealed class Unsubscriber(Action action) : IDisposable
+{
+    private Action? _action = action;
+
+    public void Dispose() => Interlocked.Exchange(ref _action, null)?.Invoke();
 }

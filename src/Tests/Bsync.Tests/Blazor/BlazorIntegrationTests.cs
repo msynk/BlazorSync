@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using Bsync.Blazor;
+using Bsync.Client;
 using Bsync.Clocks;
 using Bsync.Protocol;
 using Bsync.Server;

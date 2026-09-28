@@ -1,9 +1,9 @@
-namespace Bsync.Blazor;
+namespace Bsync.Client;
 
 /// <summary>
-/// The component-facing API for one synchronized collection. Components depend only on this interface, so
-/// the same component works in every render mode; what differs between hosts is described by
-/// <see cref="Capabilities"/> and by the confirmation level of each write.
+/// The UI-facing API for one synchronized collection. Components and view models depend only on this interface,
+/// so the same UI code works in every Blazor render mode and in native hosts; what differs between hosts is
+/// described by <see cref="Capabilities"/> and by the confirmation level of each write.
 /// </summary>
 /// <typeparam name="TDocument">The synchronized entity type.</typeparam>
 public interface ISyncCollection<TDocument>
@@ -73,8 +73,9 @@ public interface ISyncCollection<TDocument>
 
     /// <summary>
     /// Calls <paramref name="onChanged"/> when documents or <see cref="Status"/> may have changed. The callback
-    /// may run on any thread; components should call <c>InvokeAsync(StateHasChanged)</c> and re-query.
-    /// Dispose the result (for example in the component's <c>Dispose</c>) to stop receiving calls.
+    /// may run on any thread: Blazor components should call <c>InvokeAsync(StateHasChanged)</c>, other UIs should
+    /// dispatch to their UI thread, and then re-query. Dispose the result (for example in the component's or view
+    /// model's <c>Dispose</c>) to stop receiving calls.
     /// </summary>
     IDisposable Subscribe(Action onChanged);
 }
@@ -95,6 +96,22 @@ public sealed record SyncQuery<TDocument>
 
     /// <summary>Maximum number of documents returned (1 to <see cref="MaxLimit"/>). Default 100.</summary>
     public int Limit { get; init; } = 100;
+
+    /// <summary>
+    /// Evaluates the query in memory: drops deleted documents, keeps those matching <see cref="Where"/>, sorts by
+    /// <see cref="Order"/> and returns at most <see cref="Limit"/>. For <see cref="ISyncCollection{TDocument}"/>
+    /// implementations that read their documents from elsewhere.
+    /// </summary>
+    /// <param name="documents">The documents to evaluate.</param>
+    public IReadOnlyList<TDocument> Apply(IEnumerable<TDocument> documents)
+    {
+        ArgumentNullException.ThrowIfNull(documents);
+        Queries.Validate(this);
+
+        var matching = documents.Where(d => !d.Deleted && (Where?.Invoke(d) ?? true)).ToList();
+        matching.Sort(Order ?? ((a, b) => string.CompareOrdinal(a.Id, b.Id)));
+        return matching.Count > Limit ? matching.GetRange(0, Limit) : matching;
+    }
 }
 
 /// <summary>What a host can do.</summary>
@@ -218,16 +235,5 @@ internal static class Queries
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(query.Limit, 1, nameof(query.Limit));
         ArgumentOutOfRangeException.ThrowIfGreaterThan(query.Limit, SyncQuery<TDocument>.MaxLimit, nameof(query.Limit));
-    }
-
-    public static IReadOnlyList<TDocument> Apply<TDocument>(IEnumerable<TDocument> documents, SyncQuery<TDocument>? query)
-        where TDocument : class, ISyncEntity
-    {
-        query ??= new SyncQuery<TDocument>();
-        Validate(query);
-
-        var matching = documents.Where(d => !d.Deleted && (query.Where?.Invoke(d) ?? true)).ToList();
-        matching.Sort(query.Order ?? ((a, b) => string.CompareOrdinal(a.Id, b.Id)));
-        return matching.Count > query.Limit ? matching.GetRange(0, query.Limit) : matching;
     }
 }

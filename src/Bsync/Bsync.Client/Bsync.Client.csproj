@@ -8,15 +8,16 @@
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <IsAotCompatible>true</IsAotCompatible>
-    <Description>Blazor server integration for Bsync: a server-connected collection (Interactive Server, prerendering, static SSR) that writes as the authenticated Blazor user. The collection API and the local replica session are in Bsync.Client.</Description>
+    <Description>UI-independent client for Bsync: a local replica session with its replication loop, the collection API and a DI recipe, for Blazor WebAssembly and Hybrid, MAUI, WPF, WinForms, Avalonia, console and service hosts.</Description>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.AspNetCore.Components.Authorization" Version="10.0.12" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.12" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.12" />
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Bsync.Client\Bsync.Client.csproj" />
+    <ProjectReference Include="..\Bsync\Bsync.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -8,6 +8,13 @@
   domain schema versioned independently (ADR-011); a documented client/server compatibility window.
 - Behavioural changes count as breaking even when signatures do not change.
 
+## Unreleased (UI-independent client package)
+
+| Change | Why | Migration |
+|---|---|---|
+| **Breaking:** new package `Bsync.Client` (namespace `Bsync.Client`) with `ISyncCollection<T>`, `SyncQuery<T>`, `SyncCapabilities`, `SyncStatus`, `SyncState`, `SyncItemStatus`, `SyncItemState`, `SyncDocumentConflict<T>`, `SyncConfirmation`, `SyncWriteResult`, `SyncSession<T>`, `SyncSessionOptions<T>`, `LocalReplica<T>`, `LocalSyncCollection<T>` and `AddLocalSyncCollection` (now on `ClientServiceCollectionExtensions`). They moved out of `Bsync.Blazor`, which keeps `ServerSyncCollection<T>`, `ServerSyncClock` and `AddServerSyncCollection` and references `Bsync.Client`. `Bsync.Client` depends only on the core and `Microsoft.Extensions.DependencyInjection.Abstractions`/`Logging.Abstractions`. | Native UIs without Blazor (MAUI XAML, WPF, WinForms, Avalonia) and headless hosts can use the session loop without `Microsoft.AspNetCore.Components`. | Add `using Bsync.Client;` (and `@using Bsync.Client` in Razor). Local-replica clients (WebAssembly, Hybrid, native) reference `Bsync.Client` instead of `Bsync.Blazor`; server projects keep `Bsync.Blazor`. `Bsync.Storage.IndexedDb` now references `Bsync.Client` instead of `Bsync.Blazor`. |
+| `SyncQuery<T>.Apply` evaluates a query in memory. | Shared by the collections in both packages; usable by custom `ISyncCollection` implementations. | Additive. |
+
 ## Unreleased (PostgreSQL, dependency groups, hybrid hosts)
 
 | Change | Why | Migration |

@@ -31,6 +31,7 @@
     <ProjectReference Include="..\..\Bsync\Bsync.Server.PostgreSql\Bsync.Server.PostgreSql.csproj" />
     <ProjectReference Include="..\..\Bsync\Bsync.Testing\Bsync.Testing.csproj" />
     <ProjectReference Include="..\..\Bsync\Bsync.Blazor\Bsync.Blazor.csproj" />
+    <ProjectReference Include="..\..\Bsync\Bsync.Client\Bsync.Client.csproj" />
     <ProjectReference Include="..\..\Bsync\Bsync.Storage.IndexedDb\Bsync.Storage.IndexedDb.csproj" />
   </ItemGroup>
 

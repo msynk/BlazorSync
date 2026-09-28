@@ -1,7 +1,7 @@
 using System.IO;
 using System.Text.Json;
 using System.Windows;
-using Bsync.Blazor;
+using Bsync.Client;
 using Bsync.Samples.Shared;
 using Microsoft.Extensions.DependencyInjection;
 

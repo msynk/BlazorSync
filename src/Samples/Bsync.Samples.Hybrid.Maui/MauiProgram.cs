@@ -1,4 +1,4 @@
-using Bsync.Blazor;
+using Bsync.Client;
 using Bsync.Documents;
 using Bsync.Protocol;
 using Bsync.Samples.Shared;

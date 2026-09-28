@@ -1,0 +1,164 @@
+static class Bsync.Client.ClientServiceCollectionExtensions
+  static Microsoft.Extensions.DependencyInjection.IServiceCollection AddLocalSyncCollection<TDocument>(Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Func<System.IServiceProvider, Bsync.Client.SyncSessionOptions<TDocument>> options, System.Func<System.IServiceProvider, System.Threading.CancellationToken, System.Threading.Tasks.Task<System.String>> resolveAccount = null) where TDocument : class, Bsync.ISyncEntity
+interface Bsync.Client.ISyncCollection<TDocument> where TDocument : class, Bsync.ISyncEntity
+  Bsync.Client.SyncCapabilities Capabilities { get; }
+  Bsync.Client.SyncStatus Status { get; }
+  abstract System.IDisposable Subscribe(System.Action onChanged)
+  abstract System.Threading.Tasks.Task<Bsync.Client.SyncItemStatus> GetItemStatusAsync(System.String id, System.Threading.CancellationToken cancellationToken = default)
+  abstract System.Threading.Tasks.Task<Bsync.Client.SyncWriteResult> DeleteAsync(System.String id, System.Threading.CancellationToken cancellationToken = default)
+  abstract System.Threading.Tasks.Task<Bsync.Client.SyncWriteResult> ResolveConflictAsync(System.String id, TDocument resolved, System.Threading.CancellationToken cancellationToken = default)
+  abstract System.Threading.Tasks.Task<Bsync.Client.SyncWriteResult> RetryAsync(System.String id, System.Threading.CancellationToken cancellationToken = default)
+  abstract System.Threading.Tasks.Task<Bsync.Client.SyncWriteResult> SaveAsync(TDocument document, System.Threading.CancellationToken cancellationToken = default)
+  abstract System.Threading.Tasks.Task<System.Boolean> DiscardConflictAsync(System.String id, System.Threading.CancellationToken cancellationToken = default)
+  abstract System.Threading.Tasks.Task<System.Boolean> RevertAsync(System.String id, System.Threading.CancellationToken cancellationToken = default)
+  abstract System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<Bsync.Client.SyncDocumentConflict<TDocument>>> GetConflictsAsync(System.Int32 limit = 100, System.Threading.CancellationToken cancellationToken = default)
+  abstract System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<Bsync.Client.SyncWriteResult>> SaveAllAsync(System.Collections.Generic.IReadOnlyList<TDocument> documents, System.Threading.CancellationToken cancellationToken = default)
+  abstract System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TDocument>> QueryAsync(Bsync.Client.SyncQuery<TDocument> query = null, System.Threading.CancellationToken cancellationToken = default)
+  abstract System.Threading.Tasks.Task<TDocument> GetAsync(System.String id, System.Threading.CancellationToken cancellationToken = default)
+record Bsync.Client.LocalReplica<TDocument> where TDocument : class, Bsync.ISyncEntity
+  Bsync.Storage.ILocalStore<TDocument> Store { get; init; }
+  System.Boolean Equals(Bsync.Client.LocalReplica<TDocument> other)
+  System.String NodeId { get; init; }
+  System.Void Deconstruct(out Bsync.Storage.ILocalStore<TDocument> Store, out System.String NodeId)
+  ctor(Bsync.Storage.ILocalStore<TDocument> Store, System.String NodeId)
+  virtual System.Boolean Equals(System.Object obj)
+  virtual System.Int32 GetHashCode()
+  virtual System.String ToString()
+sealed class Bsync.Client.LocalSyncCollection<TDocument> : Bsync.Client.ISyncCollection<TDocument> where TDocument : class, Bsync.ISyncEntity
+  Bsync.Client.SyncCapabilities Capabilities { get; }
+  Bsync.Client.SyncStatus Status { get; }
+  System.IDisposable Subscribe(System.Action onChanged)
+  System.Threading.Tasks.Task<Bsync.Client.SyncItemStatus> GetItemStatusAsync(System.String id, System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<Bsync.Client.SyncWriteResult> DeleteAsync(System.String id, System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<Bsync.Client.SyncWriteResult> ResolveConflictAsync(System.String id, TDocument resolved, System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<Bsync.Client.SyncWriteResult> RetryAsync(System.String id, System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<Bsync.Client.SyncWriteResult> SaveAsync(TDocument document, System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<System.Boolean> DiscardConflictAsync(System.String id, System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<System.Boolean> RevertAsync(System.String id, System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<Bsync.Client.SyncDocumentConflict<TDocument>>> GetConflictsAsync(System.Int32 limit = 100, System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<Bsync.Client.SyncWriteResult>> SaveAllAsync(System.Collections.Generic.IReadOnlyList<TDocument> documents, System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TDocument>> QueryAsync(Bsync.Client.SyncQuery<TDocument> query = null, System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<TDocument> GetAsync(System.String id, System.Threading.CancellationToken cancellationToken = default)
+  ctor(Bsync.Client.SyncSession<TDocument> session, System.Func<System.Threading.CancellationToken, System.Threading.Tasks.Task<System.String>> resolveAccount)
+record Bsync.Client.SyncCapabilities
+  System.Boolean DurableOfflineWrites { get; init; }
+  System.Boolean Equals(Bsync.Client.SyncCapabilities other)
+  System.Boolean LiveUpdates { get; init; }
+  System.Boolean WritesConfirmedByServer { get; init; }
+  System.String Host { get; init; }
+  System.Void Deconstruct(out System.String Host, out System.Boolean DurableOfflineWrites, out System.Boolean WritesConfirmedByServer, out System.Boolean LiveUpdates)
+  ctor(System.String Host, System.Boolean DurableOfflineWrites, System.Boolean WritesConfirmedByServer, System.Boolean LiveUpdates)
+  virtual System.Boolean Equals(System.Object obj)
+  virtual System.Int32 GetHashCode()
+  virtual System.String ToString()
+enum Bsync.Client.SyncConfirmation
+  AcceptedByServer = 1
+  Conflict = 2
+  NotFound = 4
+  Rejected = 3
+  SavedLocally = 0
+record Bsync.Client.SyncDocumentConflict<TDocument> where TDocument : class, Bsync.ISyncEntity
+  System.Boolean Equals(Bsync.Client.SyncDocumentConflict<TDocument> other)
+  System.String Id { get; init; }
+  System.Void Deconstruct(out System.String Id, out TDocument Local, out TDocument Server, out TDocument Base)
+  TDocument Base { get; init; }
+  TDocument Local { get; init; }
+  TDocument Server { get; init; }
+  ctor(System.String Id, TDocument Local, TDocument Server, TDocument Base)
+  virtual System.Boolean Equals(System.Object obj)
+  virtual System.Int32 GetHashCode()
+  virtual System.String ToString()
+enum Bsync.Client.SyncItemState
+  Conflicted = 4
+  MissingAfterReset = 3
+  Pending = 1
+  Rejected = 2
+  Synced = 0
+record Bsync.Client.SyncItemStatus
+  Bsync.Client.SyncItemState State { get; init; }
+  System.Boolean Equals(Bsync.Client.SyncItemStatus other)
+  System.String Detail { get; init; }
+  System.Void Deconstruct(out Bsync.Client.SyncItemState State, out System.String Detail)
+  ctor(Bsync.Client.SyncItemState State, System.String Detail = null)
+  virtual System.Boolean Equals(System.Object obj)
+  virtual System.Int32 GetHashCode()
+  virtual System.String ToString()
+record Bsync.Client.SyncQuery<TDocument> where TDocument : class, Bsync.ISyncEntity
+  System.Boolean Equals(Bsync.Client.SyncQuery<TDocument> other)
+  System.Collections.Generic.IReadOnlyList<TDocument> Apply(System.Collections.Generic.IEnumerable<TDocument> documents)
+  System.Comparison<TDocument> Order { get; init; }
+  System.Func<TDocument, System.Boolean> Where { get; init; }
+  System.Int32 Limit { get; init; }
+  const System.Int32 MaxLimit = 1000
+  ctor()
+  virtual System.Boolean Equals(System.Object obj)
+  virtual System.Int32 GetHashCode()
+  virtual System.String ToString()
+record Bsync.Client.SyncSessionOptions<TDocument> where TDocument : class, Bsync.ISyncEntity
+  Bsync.Conflicts.IConflictHandler<TDocument> ConflictHandler { get; init; }
+  Bsync.SyncOptions<TDocument> EngineOptions { get; init; }
+  Microsoft.Extensions.Logging.ILogger Logger { get; init; }
+  System.Boolean Equals(Bsync.Client.SyncSessionOptions<TDocument> other)
+  System.Boolean LiveHints { get; init; }
+  System.Func<Bsync.Client.SyncSession<TDocument>, System.String, System.Threading.CancellationToken, System.Threading.Tasks.Task<System.IAsyncDisposable>> AttachLifecycle { get; init; }
+  System.Func<System.String, Bsync.Transport.ISyncTransport<TDocument>> CreateTransport { get; init; }
+  System.Func<System.String, System.Threading.CancellationToken, System.Threading.Tasks.Task<Bsync.Client.LocalReplica<TDocument>>> OpenReplica { get; init; }
+  System.Func<System.String, System.Threading.CancellationToken, System.Threading.Tasks.Task<System.Boolean>> RenewCredentials { get; init; }
+  System.Func<System.String, System.Threading.CancellationToken, System.Threading.Tasks.Task<System.IAsyncDisposable>> AcquireLease { get; init; }
+  System.Func<TDocument, TDocument> Cloner { get; init; }
+  System.String Host { get; init; }
+  System.TimeProvider TimeProvider { get; init; }
+  System.TimeSpan FollowerRefresh { get; init; }
+  System.TimeSpan Interval { get; init; }
+  System.TimeSpan MaxBackoff { get; init; }
+  System.TimeSpan MinBackoff { get; init; }
+  ctor()
+  virtual System.Boolean Equals(System.Object obj)
+  virtual System.Int32 GetHashCode()
+  virtual System.String ToString()
+sealed class Bsync.Client.SyncSession<TDocument> : System.IAsyncDisposable where TDocument : class, Bsync.ISyncEntity
+  Bsync.Client.SyncStatus Status { get; }
+  System.Boolean LiveHints { get; }
+  System.String Account { get; }
+  System.String Host { get; }
+  System.Threading.Tasks.Task NotifyLocalWriteAsync(System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task StopAsync()
+  System.Threading.Tasks.Task<Bsync.SyncEngine<TDocument>> GetEngineAsync(System.String account, System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.ValueTask DisposeAsync()
+  System.Void Pause()
+  System.Void RequestSync()
+  System.Void Resume()
+  ctor(Bsync.Client.SyncSessionOptions<TDocument> options)
+  public event System.Action Changed
+enum Bsync.Client.SyncState
+  AttentionRequired = 5
+  Follower = 4
+  Offline = 3
+  Paused = 7
+  Starting = 0
+  Stopped = 6
+  Synced = 1
+  Syncing = 2
+record Bsync.Client.SyncStatus
+  Bsync.Client.SyncState State { get; init; }
+  System.Boolean Equals(Bsync.Client.SyncStatus other)
+  System.DateTimeOffset? LastSynced { get; init; }
+  System.Int32 Pending { get; init; }
+  System.String Detail { get; init; }
+  System.Void Deconstruct(out Bsync.Client.SyncState State, out System.Int32 Pending, out System.String Detail, out System.DateTimeOffset? LastSynced)
+  ctor(Bsync.Client.SyncState State, System.Int32 Pending, System.String Detail, System.DateTimeOffset? LastSynced)
+  static Bsync.Client.SyncStatus Starting { get; }
+  virtual System.Boolean Equals(System.Object obj)
+  virtual System.Int32 GetHashCode()
+  virtual System.String ToString()
+record Bsync.Client.SyncWriteResult
+  Bsync.Client.SyncConfirmation Confirmation { get; init; }
+  System.Boolean Equals(Bsync.Client.SyncWriteResult other)
+  System.Boolean Succeeded { get; }
+  System.String Id { get; init; }
+  System.String Message { get; init; }
+  System.Void Deconstruct(out System.String Id, out Bsync.Client.SyncConfirmation Confirmation, out System.String Message)
+  ctor(System.String Id, Bsync.Client.SyncConfirmation Confirmation, System.String Message = null)
+  virtual System.Boolean Equals(System.Object obj)
+  virtual System.Int32 GetHashCode()
+  virtual System.String ToString()

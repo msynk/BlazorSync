@@ -5,7 +5,7 @@ using Bsync.Transport;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
-namespace Bsync.Blazor;
+namespace Bsync.Client;
 
 /// <summary>A local replica opened for one account: its store and the HLC node id to stamp writes with.</summary>
 /// <typeparam name="TDocument">The synchronized entity type.</typeparam>

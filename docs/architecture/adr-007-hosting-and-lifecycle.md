@@ -1,7 +1,8 @@
 # ADR-007: Hosting profiles, application API, DI lifetimes and lifecycle
 
-- **Status:** Accepted; implemented for every profile. The browser, server-connected and request profiles are
-  covered by `Bsync.Blazor`. The native profile has WPF and .NET MAUI (Windows) Blazor Hybrid samples, each
+- **Status:** Accepted; implemented for every profile. The collection API and the local-replica session
+  (browser and native profiles) are in `Bsync.Client`, which has no UI dependency; the server-connected and
+  request profiles are in `Bsync.Blazor`. The native profile has WPF and .NET MAUI (Windows) Blazor Hybrid samples, each
   with SQLite, HTTP, pause/resume on minimize/background, and an automated UI test (2026-09-28).
 - **Invariants:** I07, I13, I15, I16, I18
 

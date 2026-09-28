@@ -1,7 +1,7 @@
 using System.IO;
 using System.Net.Http;
 using System.Windows;
-using Bsync.Blazor;
+using Bsync.Client;
 using Bsync.Documents;
 using Bsync.Protocol;
 using Bsync.Samples.Shared;

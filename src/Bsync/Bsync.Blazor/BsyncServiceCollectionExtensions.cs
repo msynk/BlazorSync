@@ -1,18 +1,19 @@
 using System.Security.Claims;
+using Bsync.Client;
 using Bsync.Clocks;
 using Bsync.Server;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.Extensions.Logging;
 
 namespace Bsync.Blazor;
 
 /// <summary>
-/// Explicit registration recipes, one per hosting profile (docs/architecture/adr-007). Register exactly one
+/// The server-connected registration recipe (docs/architecture/adr-007). Register exactly one
 /// <see cref="ISyncCollection{TDocument}"/> per runtime: in a Blazor Web App the server project registers the
-/// server-connected collection and the WebAssembly client project registers the local one; each runtime has its
-/// own container, so Auto render mode gets the right one on each side.
+/// server-connected collection and the WebAssembly client project registers the local one
+/// (<see cref="ClientServiceCollectionExtensions.AddLocalSyncCollection{TDocument}"/> in <c>Bsync.Client</c>); each
+/// runtime has its own container, so Auto render mode gets the right one on each side.
 /// </summary>
 public static class BsyncServiceCollectionExtensions
 {
@@ -56,41 +57,6 @@ public static class BsyncServiceCollectionExtensions
                 sp.GetRequiredService<ServerSyncClock>().Clock,
                 cloner);
         });
-        return services;
-    }
-
-    /// <summary>
-    /// Local-replica profile (Blazor WebAssembly, MAUI/WPF/WinForms Hybrid, headless): one session and collection
-    /// per app instance. Throws if called in an ASP.NET Core container, where a singleton replica would be
-    /// shared by every user.
-    /// </summary>
-    /// <param name="services">The client's services.</param>
-    /// <param name="options">Builds the session options (replica, transport, lease).</param>
-    /// <param name="resolveAccount">Returns the signed-in account; default <c>"default"</c>.</param>
-    public static IServiceCollection AddLocalSyncCollection<TDocument>(
-        this IServiceCollection services,
-        Func<IServiceProvider, SyncSessionOptions<TDocument>> options,
-        Func<IServiceProvider, CancellationToken, Task<string>>? resolveAccount = null)
-        where TDocument : class, ISyncEntity
-    {
-        ArgumentNullException.ThrowIfNull(services);
-        ArgumentNullException.ThrowIfNull(options);
-        if (services.Any(d => d.ServiceType.FullName == "Microsoft.AspNetCore.Hosting.IWebHostEnvironment"))
-        {
-            throw new InvalidOperationException(
-                "A local replica is per device. Register AddServerSyncCollection on the server and AddLocalSyncCollection in the WebAssembly or native client.");
-        }
-
-        services.AddSingleton(sp =>
-        {
-            var built = options(sp);
-            return new SyncSession<TDocument>(built.Logger is null && sp.GetService<ILoggerFactory>() is { } logging
-                ? built with { Logger = logging.CreateLogger("Bsync.SyncSession") }
-                : built);
-        });
-        services.AddSingleton<ISyncCollection<TDocument>>(sp => new LocalSyncCollection<TDocument>(
-            sp.GetRequiredService<SyncSession<TDocument>>(),
-            resolveAccount is null ? static _ => Task.FromResult("default") : ct => resolveAccount(sp, ct)));
         return services;
     }
 }

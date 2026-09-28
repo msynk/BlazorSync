@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/Bsync/">
     <Project Path="Bsync/Bsync.Blazor/Bsync.Blazor.csproj" />
+    <Project Path="Bsync/Bsync.Client/Bsync.Client.csproj" />
     <Project Path="Bsync/Bsync.Server.AspNetCore/Bsync.Server.AspNetCore.csproj" />
     <Project Path="Bsync/Bsync.Server.PostgreSql/Bsync.Server.PostgreSql.csproj" />
     <Project Path="Bsync/Bsync.Storage.IndexedDb/Bsync.Storage.IndexedDb.csproj" />

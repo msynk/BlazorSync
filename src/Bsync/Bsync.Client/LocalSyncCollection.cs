@@ -1,4 +1,4 @@
-namespace Bsync.Blazor;
+namespace Bsync.Client;
 
 /// <summary>
 /// A collection backed by a local replica (browser IndexedDB or native SQLite) through a
@@ -62,7 +62,7 @@ public sealed class LocalSyncCollection<TDocument> : ISyncCollection<TDocument>
         query ??= new SyncQuery<TDocument>();
         if (query.Order is not null)
         {
-            return Queries.Apply(await engine.QueryAsync(cancellationToken: cancellationToken).ConfigureAwait(false), query);
+            return query.Apply(await engine.QueryAsync(cancellationToken: cancellationToken).ConfigureAwait(false));
         }
 
         // The default order is by id, which is the store's index order: walk it in pages and stop at the limit, so

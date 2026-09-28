@@ -9,7 +9,10 @@
 - **Packages are split only when a real boundary exists** (a dependency that must not flow into another
   host). Planned order: `Bsync` (core, dependency-free) → `Bsync.Storage.Sqlite` →
   `Bsync.Server` + `Bsync.Server.AspNetCore` + `Bsync.Server.EntityFrameworkCore` →
-  `Bsync.Transport.Http` → `Bsync.Storage.IndexedDb` → `Bsync.Blazor` → `Bsync.Testing`.
+  `Bsync.Transport.Http` → `Bsync.Storage.IndexedDb` → `Bsync.Client` → `Bsync.Blazor` → `Bsync.Testing`.
+  `Bsync.Client` (collection API, local session, DI recipe) is split from `Bsync.Blazor` because
+  `Microsoft.AspNetCore.Components` must not flow into native hosts without Blazor; `Bsync.Blazor` keeps only
+  the server-connected profile, which needs the Blazor authentication state.
   Native database binaries must never enter the WebAssembly dependency graph; server code must never
   enter the client bundle.
 - **Support tiers** published in `docs/support-matrix.md`:
