@@ -1,6 +1,7 @@
+using Bsync.Storage;
 using Microsoft.JSInterop;
 
-namespace Bsync.Storage.IndexedDb;
+namespace Bsync.Blazor.IndexedDb;
 
 /// <summary>
 /// Exclusive ownership of replication for one replica across browser tabs, using the Web Locks API. Only

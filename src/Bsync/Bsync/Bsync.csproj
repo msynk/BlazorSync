@@ -8,7 +8,16 @@
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <IsAotCompatible>true</IsAotCompatible>
-    <Description>Platform-independent local-first sync protocol, change tracking and conflict resolution for Blazor (WASM, Hybrid and native).</Description>
+    <Description>Platform-independent local-first sync for .NET: the protocol, change tracking and conflict resolution, a UI-independent client (local replica session, replication loop, collection API and DI recipe) and the HTTP transport, for Blazor WebAssembly and Hybrid, MAUI, WPF, WinForms, Avalonia, console and service hosts.</Description>
   </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.12" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.12" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Bsync.Tests" />
+  </ItemGroup>
 
 </Project>

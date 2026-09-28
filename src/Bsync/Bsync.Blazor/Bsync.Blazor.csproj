@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk.Razor">
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -8,15 +8,20 @@
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <IsAotCompatible>true</IsAotCompatible>
-    <Description>Blazor server integration for Bsync: a server-connected collection (Interactive Server, prerendering, static SSR) that writes as the authenticated Blazor user. The collection API and the local replica session are in Bsync.Client.</Description>
+    <Description>Blazor integration for Bsync: a durable browser store (IndexedDB) for Blazor WebAssembly, PWAs and Interactive WebAssembly/Auto after activation, and a server-connected collection (Interactive Server, prerendering, static SSR) that writes as the authenticated Blazor user. The collection API and the local replica session are in Bsync.</Description>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.AspNetCore.Components.Authorization" Version="10.0.12" />
+    <SupportedPlatform Include="browser" />
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Bsync.Client\Bsync.Client.csproj" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.Authorization" Version="10.0.12" />
+    <PackageReference Include="Microsoft.JSInterop" Version="10.0.12" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Bsync\Bsync.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -1,8 +1,8 @@
 using Bsync.Protocol;
 using Bsync.Samples.Notes.Client;
 using Bsync.Samples.Shared;
-using Bsync.Storage.IndexedDb;
-using Bsync.Transport.Http;
+using Bsync.Blazor.IndexedDb;
+using Bsync.Transport;
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
 

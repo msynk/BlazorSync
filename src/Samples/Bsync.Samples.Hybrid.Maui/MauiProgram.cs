@@ -3,7 +3,7 @@ using Bsync.Documents;
 using Bsync.Protocol;
 using Bsync.Samples.Shared;
 using Bsync.Storage.Sqlite;
-using Bsync.Transport.Http;
+using Bsync.Transport;
 
 namespace Bsync.Samples.Hybrid.Maui;
 

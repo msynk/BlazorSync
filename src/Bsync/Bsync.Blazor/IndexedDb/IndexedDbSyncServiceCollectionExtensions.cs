@@ -5,7 +5,7 @@ using Bsync.Transport;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.JSInterop;
 
-namespace Bsync.Storage.IndexedDb;
+namespace Bsync.Blazor.IndexedDb;
 
 /// <summary>The browser (Blazor WebAssembly) registration recipe.</summary>
 public static class IndexedDbSyncServiceCollectionExtensions

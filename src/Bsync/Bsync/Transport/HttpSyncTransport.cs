@@ -5,7 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
 using Bsync.Protocol;
 
-namespace Bsync.Transport.Http;
+namespace Bsync.Transport;
 
 /// <summary>
 /// An <see cref="ISyncTransport{TDocument}"/> for the HTTP binding (docs/protocol/v1.md §8). Failures are

@@ -5,7 +5,7 @@ using System.Text.RegularExpressions;
 using Bsync.Clocks;
 using Microsoft.JSInterop;
 
-namespace Bsync.Storage.IndexedDb;
+namespace Bsync.Blazor.IndexedDb;
 
 /// <summary>Options for <see cref="IndexedDbLocalStore{TDocument}"/>.</summary>
 public sealed class IndexedDbStoreOptions

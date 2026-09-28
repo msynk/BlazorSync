@@ -1,13 +1,10 @@
 <Solution>
   <Folder Name="/Bsync/">
     <Project Path="Bsync/Bsync.Blazor/Bsync.Blazor.csproj" />
-    <Project Path="Bsync/Bsync.Client/Bsync.Client.csproj" />
     <Project Path="Bsync/Bsync.Server.AspNetCore/Bsync.Server.AspNetCore.csproj" />
     <Project Path="Bsync/Bsync.Server.PostgreSql/Bsync.Server.PostgreSql.csproj" />
-    <Project Path="Bsync/Bsync.Storage.IndexedDb/Bsync.Storage.IndexedDb.csproj" />
     <Project Path="Bsync/Bsync.Storage.Sqlite/Bsync.Storage.Sqlite.csproj" />
     <Project Path="Bsync/Bsync.Testing/Bsync.Testing.csproj" />
-    <Project Path="Bsync/Bsync.Transport.Http/Bsync.Transport.Http.csproj" />
     <Project Path="Bsync/Bsync/Bsync.csproj" />
   </Folder>
   <Folder Name="/Samples/">

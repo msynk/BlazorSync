@@ -7,12 +7,15 @@
 - **Target framework:** `net10.0` only. .NET 10 is the current LTS release (see ADR-001 sources for the
   lifecycle dates checked). Adding older targets requires a demonstrated user need and CI coverage.
 - **Packages are split only when a real boundary exists** (a dependency that must not flow into another
-  host). Planned order: `Bsync` (core, dependency-free) → `Bsync.Storage.Sqlite` →
-  `Bsync.Server` + `Bsync.Server.AspNetCore` + `Bsync.Server.EntityFrameworkCore` →
-  `Bsync.Transport.Http` → `Bsync.Storage.IndexedDb` → `Bsync.Client` → `Bsync.Blazor` → `Bsync.Testing`.
-  `Bsync.Client` (collection API, local session, DI recipe) is split from `Bsync.Blazor` because
-  `Microsoft.AspNetCore.Components` must not flow into native hosts without Blazor; `Bsync.Blazor` keeps only
-  the server-connected profile, which needs the Blazor authentication state.
+  host). Packages: `Bsync` (core, the UI-independent client in namespace `Bsync.Client` and the HTTP
+  transport in `Bsync.Transport`; depends only on the DI and logging abstractions), `Bsync.Blazor` (browser
+  store in `Bsync.Blazor.IndexedDb` and the server-connected profile; JS interop and the Blazor
+  authentication state), `Bsync.Storage.Sqlite` (native SQLite binaries), `Bsync.Server.AspNetCore` (the
+  ASP.NET Core shared framework), `Bsync.Server.PostgreSql` (Npgsql) and `Bsync.Testing` (provider
+  conformance cases). The client and HTTP transport live in the core because they add no dependency that
+  must be kept out of any host; `Microsoft.AspNetCore.Components` still never flows into native hosts
+  without Blazor. The browser store and the server-connected collection share `Bsync.Blazor` because both
+  are Blazor-only and an Auto-mode app uses both (2026-09-28: consolidated from nine packages).
   Native database binaries must never enter the WebAssembly dependency graph; server code must never
   enter the client bundle.
 - **Support tiers** published in `docs/support-matrix.md`:

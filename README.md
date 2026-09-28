@@ -41,17 +41,18 @@ server-rendered UI.
 ```
 src/Bsync.slnx                          Solution
 src/Bsync/                              Library projects (the packages)
-src/Bsync/Bsync/                        Protocol library (engine, clock, conflicts, storage/transport contracts,
-                                        in-memory reference store and authority)
+src/Bsync/Bsync/                        Core: engine, clock, conflicts, storage/transport contracts, in-memory
+                                        reference store and authority, HTTP client transport (Bsync.Transport),
+                                        and the UI-independent client (Bsync.Client: ISyncCollection, local session
+                                        loop, AddLocalSyncCollection) for Blazor WebAssembly/Hybrid, MAUI, WPF,
+                                        WinForms, Avalonia and console hosts
 src/Bsync/Bsync.Storage.Sqlite/         Durable SQLite store for native hosts (MAUI, WPF, WinForms, console)
 src/Bsync/Bsync.Server.AspNetCore/      ASP.NET Core endpoints for the protocol over any ISyncAuthority
 src/Bsync/Bsync.Server.PostgreSql/      Durable PostgreSQL authority (Npgsql)
-src/Bsync/Bsync.Transport.Http/         HTTP client transport (browser and native)
-src/Bsync/Bsync.Storage.IndexedDb/      Durable browser store (IndexedDB) with a multi-tab replication lease
 src/Bsync/Bsync.Testing/                Provider conformance cases (framework-free; also run in browsers)
-src/Bsync/Bsync.Client/                 UI-independent client: ISyncCollection, local session loop, AddLocalSyncCollection
-                                        (Blazor WebAssembly/Hybrid, MAUI, WPF, WinForms, Avalonia, console)
-src/Bsync/Bsync.Blazor/                 Blazor server integration: server-connected collection, AddServerSyncCollection
+src/Bsync/Bsync.Blazor/                 Blazor integration: durable browser store (Bsync.Blazor.IndexedDb, with a
+                                        multi-tab replication lease, AddBrowserSyncCollection) and the
+                                        server-connected collection (AddServerSyncCollection)
 src/Samples/                            Samples and the demo
 src/Samples/Bsync.Samples.Shared/       Note model + NotesPanel component shared by the samples
 src/Samples/Bsync.Samples.Notes.*       Offline-capable notes PWA: ASP.NET Core server + WebAssembly client

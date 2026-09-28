@@ -38,7 +38,7 @@
     <ItemGroup>
         <ProjectReference Include="..\Bsync.Samples.Shared\Bsync.Samples.Shared.csproj" />
         <ProjectReference Include="..\..\Bsync\Bsync.Storage.Sqlite\Bsync.Storage.Sqlite.csproj" />
-        <ProjectReference Include="..\..\Bsync\Bsync.Transport.Http\Bsync.Transport.Http.csproj" />
+        <ProjectReference Include="..\..\Bsync\Bsync\Bsync.csproj" />
     </ItemGroup>
 
 </Project>

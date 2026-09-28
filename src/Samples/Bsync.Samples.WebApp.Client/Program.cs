@@ -1,7 +1,7 @@
 using Bsync.Protocol;
 using Bsync.Samples.Shared;
-using Bsync.Storage.IndexedDb;
-using Bsync.Transport.Http;
+using Bsync.Blazor.IndexedDb;
+using Bsync.Transport;
 using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
 
 var builder = WebAssemblyHostBuilder.CreateDefault(args);

@@ -17,7 +17,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\Bsync\Bsync.Client\Bsync.Client.csproj" />
+    <ProjectReference Include="..\..\Bsync\Bsync\Bsync.csproj" />
   </ItemGroup>
 
 </Project>

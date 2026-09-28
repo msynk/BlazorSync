@@ -6,7 +6,7 @@ using Bsync.Clocks;
 using Bsync.Protocol;
 using Bsync.Server;
 using Bsync.Tests.TestSupport;
-using Bsync.Transport.Http;
+using Bsync.Transport;
 using Xunit;
 
 namespace Bsync.Tests.Http;

@@ -5,6 +5,6 @@ using System.Text.RegularExpressions;
 using Bsync.Clocks;
 using Microsoft.JSInterop;
 
-namespace Bsync.Storage.IndexedDb;
+namespace Bsync.Blazor.IndexedDb;
 
-internal sealed record IdbMetaUpdate(string? HighWater, IdbCursor? Cursor);
+internal sealed record IdbCommitEntry(string Id, IdbRecord? Record, string? ExpectedStamp);

@@ -3,9 +3,8 @@ using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
 using Bsync.Protocol;
-using Bsync.Transport;
 
-namespace Bsync.Transport.Http;
+namespace Bsync.Transport;
 
 /// <summary>Options for <see cref="HttpSyncTransport{TDocument}"/>.</summary>
 public sealed class HttpSyncTransportOptions

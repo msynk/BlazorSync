@@ -11,7 +11,7 @@ namespace Bsync.Blazor;
 /// The server-connected registration recipe (docs/architecture/adr-007). Register exactly one
 /// <see cref="ISyncCollection{TDocument}"/> per runtime: in a Blazor Web App the server project registers the
 /// server-connected collection and the WebAssembly client project registers the local one
-/// (<see cref="ClientServiceCollectionExtensions.AddLocalSyncCollection{TDocument}"/> in <c>Bsync.Client</c>); each
+/// (<see cref="ClientServiceCollectionExtensions.AddLocalSyncCollection{TDocument}"/> in <c>Bsync</c>); each
 /// runtime has its own container, so Auto render mode gets the right one on each side.
 /// </summary>
 public static class BsyncServiceCollectionExtensions

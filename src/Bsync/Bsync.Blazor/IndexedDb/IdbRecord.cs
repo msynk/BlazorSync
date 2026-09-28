@@ -5,7 +5,7 @@ using System.Text.RegularExpressions;
 using Bsync.Clocks;
 using Microsoft.JSInterop;
 
-namespace Bsync.Storage.IndexedDb;
+namespace Bsync.Blazor.IndexedDb;
 
 /// <summary>Serialized form of one record in IndexedDB. 64-bit numbers are strings.</summary>
 internal sealed class IdbRecord

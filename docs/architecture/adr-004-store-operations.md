@@ -47,7 +47,7 @@ page and its checkpoint could be persisted separately.
   and the process-kill tests.
 - The contract gained a replica cursor (checkpoint + generation + resnapshot flag) and `GetStaleAsync`
   for the reset flow (ADR-005, protocol §6.1).
-- `IndexedDbLocalStore` (`Bsync.Storage.IndexedDb`): optimistic read-compute-conditional-write per
+- `IndexedDbLocalStore` (`Bsync.Blazor`, namespace `Bsync.Blazor.IndexedDb`): optimistic read-compute-conditional-write per
   update in one readwrite transaction (ADR-008).
 - Phase 8 (2026-09-28): stores persist `SyncRecord.Conflict` and list conflicts by id
   (`GetConflictsAsync(limit)`); `PurgeAsync(ids, generation)` physically removes clean records of older

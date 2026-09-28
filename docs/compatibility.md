@@ -8,6 +8,13 @@
   domain schema versioned independently (ADR-011); a documented client/server compatibility window.
 - Behavioural changes count as breaking even when signatures do not change.
 
+## Unreleased (package consolidation)
+
+| Change | Why | Migration |
+|---|---|---|
+| **Breaking:** `Bsync.Client` and `Bsync.Transport.Http` merged into `Bsync`. The client types keep namespace `Bsync.Client`; `HttpSyncTransport<T>` and `HttpSyncTransportOptions` moved from `Bsync.Transport.Http` to `Bsync.Transport`. `Bsync` now depends on `Microsoft.Extensions.DependencyInjection.Abstractions` and `Logging.Abstractions` 10.0.12. | Fewer packages; neither package carried a dependency that had to stay out of any host (ADR-012). | Replace references to `Bsync.Client` and `Bsync.Transport.Http` with `Bsync`. Replace `using Bsync.Transport.Http;` with `using Bsync.Transport;`. |
+| **Breaking:** `Bsync.Storage.IndexedDb` merged into `Bsync.Blazor`. Its types moved from namespace `Bsync.Storage.IndexedDb` to `Bsync.Blazor.IndexedDb`, and the JavaScript module is served from `_content/Bsync.Blazor/bsync-indexeddb.js`. | Both are Blazor-only; an Auto-mode app uses both. | Replace references to `Bsync.Storage.IndexedDb` with `Bsync.Blazor`. Replace `using Bsync.Storage.IndexedDb;` with `using Bsync.Blazor.IndexedDb;`. Service workers or CSP rules that list the old module path need the new one. |
+
 ## Unreleased (UI-independent client package)
 
 | Change | Why | Migration |

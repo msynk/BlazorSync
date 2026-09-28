@@ -4,7 +4,7 @@ using Bsync.Protocol;
 using Bsync.Server;
 using Bsync.Server.AspNetCore;
 using Bsync.Tests.TestSupport;
-using Bsync.Transport.Http;
+using Bsync.Transport;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.TestHost;

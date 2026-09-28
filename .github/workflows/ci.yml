@@ -95,8 +95,8 @@ jobs:
         with:
           dotnet-version: 10.0.x
       - run: >-
-          for p in Bsync Bsync.Blazor Bsync.Client Bsync.Server.AspNetCore Bsync.Server.PostgreSql Bsync.Storage.IndexedDb
-          Bsync.Storage.Sqlite Bsync.Testing Bsync.Transport.Http;
+          for p in Bsync Bsync.Blazor Bsync.Server.AspNetCore Bsync.Server.PostgreSql
+          Bsync.Storage.Sqlite Bsync.Testing;
           do dotnet pack src/Bsync/$p -c Release -o artifacts/packages || exit 1; done
       - uses: actions/upload-artifact@v4
         with:

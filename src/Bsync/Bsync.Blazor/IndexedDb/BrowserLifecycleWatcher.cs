@@ -1,6 +1,6 @@
 using Microsoft.JSInterop;
 
-namespace Bsync.Storage.IndexedDb;
+namespace Bsync.Blazor.IndexedDb;
 
 /// <summary>
 /// Calls a callback when the browser reports that the network is back (<c>online</c>) or the tab became visible

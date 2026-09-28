@@ -3,9 +3,9 @@ using Bsync.Clocks;
 using Bsync.Documents;
 using Bsync.Protocol;
 using Bsync.Storage;
-using Bsync.Storage.IndexedDb;
+using Bsync.Blazor.IndexedDb;
 using Bsync.Testing;
-using Bsync.Transport.Http;
+using Bsync.Transport;
 using Microsoft.JSInterop;
 
 namespace Bsync.Tests.BrowserHost;

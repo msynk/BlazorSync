@@ -14,8 +14,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\Bsync\Bsync\Bsync.csproj" />
-    <ProjectReference Include="..\..\Bsync\Bsync.Storage.IndexedDb\Bsync.Storage.IndexedDb.csproj" />
-    <ProjectReference Include="..\..\Bsync\Bsync.Transport.Http\Bsync.Transport.Http.csproj" />
+    <ProjectReference Include="..\..\Bsync\Bsync.Blazor\Bsync.Blazor.csproj" />
     <ProjectReference Include="..\..\Bsync\Bsync.Testing\Bsync.Testing.csproj" />
   </ItemGroup>
 

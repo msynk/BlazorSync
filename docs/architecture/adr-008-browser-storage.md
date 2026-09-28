@@ -1,6 +1,6 @@
 # ADR-008: Browser storage
 
-- **Status:** Accepted and implemented (`Bsync.Storage.IndexedDb`, 2026-09-27)
+- **Status:** Accepted and implemented (`Bsync.Storage.IndexedDb`, 2026-09-27; now in `Bsync.Blazor`, namespace `Bsync.Blazor.IndexedDb`)
 - **Invariants:** I01, I02, I03, I14
 
 ## Context

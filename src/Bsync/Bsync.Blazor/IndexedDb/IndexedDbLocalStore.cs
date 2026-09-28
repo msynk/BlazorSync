@@ -3,13 +3,14 @@ using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
 using System.Text.RegularExpressions;
 using Bsync.Clocks;
+using Bsync.Storage;
 using Microsoft.JSInterop;
 
-namespace Bsync.Storage.IndexedDb;
+namespace Bsync.Blazor.IndexedDb;
 
 /// <summary>
 /// A durable <see cref="ILocalStore{TDocument}"/> in the browser's IndexedDB, through a small JavaScript
-/// module (<c>_content/Bsync.Storage.IndexedDb/bsync-indexeddb.js</c>).
+/// module (<c>_content/Bsync.Blazor/bsync-indexeddb.js</c>).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -28,7 +29,7 @@ namespace Bsync.Storage.IndexedDb;
 public sealed partial class IndexedDbLocalStore<TDocument> : ILocalStore<TDocument>, IAsyncDisposable
     where TDocument : class, ISyncEntity
 {
-    private const string ModulePath = "./_content/Bsync.Storage.IndexedDb/bsync-indexeddb.js";
+    private const string ModulePath = "./_content/Bsync.Blazor/bsync-indexeddb.js";
 
     private readonly IJSObjectReference _module;
     private readonly int _handle;
