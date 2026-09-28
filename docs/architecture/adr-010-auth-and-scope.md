@@ -1,6 +1,6 @@
 # ADR-010: Authentication and scope identity
 
-- **Status:** Accepted; implemented for the reference authority (2026-09-28)
+- **Status:** Accepted; implemented for the reference and PostgreSQL authorities (2026-09-28)
 - **Invariants:** I07, I10, I14, I18
 
 ## Decision
@@ -32,8 +32,11 @@
   checkpoint. A different fingerprint yields `reset-required` with reason `scope-changed`; the replica
   resnapshots and removes documents no longer visible (never records with local changes or kept conflicts).
   Revocation and regrant are tested (`SelectiveSyncTests`).
-- Receipts are per scope (each scope has its own authority); receipts are not yet bound to a fingerprint
-  inside one scope.
+- Receipts are per scope: each in-memory scope has its own authority, and PostgreSQL keys receipts by
+  (collection, scope, operation id). Receipts are not bound to a fingerprint inside one scope.
+- PostgreSQL serves every scope from one instance. Its checkpoints bind the collection, the scope and the scope
+  fingerprint, so a checkpoint from another tenant or collection yields `reset-required`
+  (`PostgreSqlAuthorityTests.Scopes`).
 - Replica id and incarnation: SQLite and IndexedDB stores (Phases 3 and 5). Account switching stops the
   session and abandons in-flight work (Phase 7). Encryption at rest and token/cookie guidance with a real
   identity provider: not done.

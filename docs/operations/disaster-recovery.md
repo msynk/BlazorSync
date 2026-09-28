@@ -28,7 +28,18 @@ var restored = new InMemorySyncServer<Note>(new InMemorySyncServerOptions<Note>
 });
 ```
 
-A database-backed authority must provide the same guarantees (Phase 4, not implemented yet).
+The PostgreSQL authority does the same after the database has been restored (for example with
+`pg_restore`, or a point-in-time recovery):
+
+```csharp
+var floor = /* a version at or above anything issued before the incident, e.g. from monitoring of
+               GetHighestVersionAsync(scope), plus a safety margin */;
+await authority.BeginNewEpochAsync(floor);   // new epoch for every collection in the database
+```
+
+Receipts restored with the tables are kept. Tested: `PostgreSqlAuthorityTests.RestoreDrill`. It restores the
+tables from a copy taken earlier and checks that replicas reset, keep pending edits and reuse no version. A
+`pg_dump`/`pg_restore` round trip was not scripted.
 
 **What users see.** Each replica resets automatically on its next sync:
 
@@ -51,7 +62,9 @@ A database-backed authority must provide the same guarantees (Phase 4, not imple
   longest time a device may stay offline with unsent work. A resend after its receipt was purged is never
   applied twice, but it comes back as a conflict. With the default policy it is then kept for the user,
   although the write had in fact succeeded.
-- Neither purge runs automatically in the reference authority.
+- Neither purge runs automatically. With PostgreSQL, schedule `PurgeTombstonesAsync(scope, version)` and
+  `PurgeReceiptsAsync(scope, version)` per scope, for example from a background job. They are tested in
+  `PostgreSqlAuthorityTests.Retention`.
 
 ## 3. Access changes
 
@@ -140,9 +153,11 @@ members. There is no upcasting hook yet.
 
 ## 8. Checklist before going to production
 
-This is not possible yet: the only authority is in memory (Phase 4). When a durable authority exists:
+With the PostgreSQL authority:
 
 - A backup schedule, and a tested restore that starts a new epoch with a version floor.
 - A receipt retention period longer than the longest supported offline period.
 - A tombstone retention period, with users told what happens to devices offline for longer.
-- Monitoring of rejected and conflicted counts per replica (Phase 10).
+- Monitoring of rejected and conflicted counts per replica, and of `blazorsync.server.requests{result="unavailable"}`
+  (docs/operations/observability.md).
+- Uploads drained before changing a document's shape (ADR-013), or both shapes readable during the roll-out.

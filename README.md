@@ -3,11 +3,13 @@
 Local-first document replication for .NET and Blazor: local writes that never wait for the network,
 change tracking, retry-safe push, checkpointed pull and pluggable conflict resolution.
 
-> **Status: pre-1.0, not published.** Durable client stores (SQLite on native hosts, IndexedDB in browsers),
-> the HTTP binding and the Blazor integration are tested, including in Chromium, Firefox and WebKit. The only
-> server authority is the in-memory reference implementation, which loses its data on restart, so this is not
-> ready for production data yet. See [docs/support-matrix.md](docs/support-matrix.md) and
-> [docs/roadmap.md](docs/roadmap.md). Targets `net10.0`.
+> **Status: pre-1.0, not published.**
+> - Tested: durable client stores (SQLite on native hosts, IndexedDB in browsers), a PostgreSQL authority, the
+>   HTTP binding, and the Blazor integration: web render modes in Chromium, Firefox and WebKit, plus WPF and .NET
+>   MAUI Hybrid on Windows.
+> - Everything was verified on one Windows machine; the CI workflow for Linux and macOS has not run yet.
+>
+> See [docs/support-matrix.md](docs/support-matrix.md) and [docs/roadmap.md](docs/roadmap.md). Targets `net10.0`.
 
 ## What it guarantees today
 
@@ -28,8 +30,11 @@ IndexedDB; details and evidence in [docs/architecture/invariants.md](docs/archit
 - **Bounded, honest runs.** Batch and retry budgets are enforced, and `SyncResult.IsComplete` says whether
   work remains.
 
-It does **not** provide cross-document transactions, causal consistency, a durable server authority, or
-offline execution for purely server-rendered UI.
+- **All-or-nothing groups.** Changes written together with `WriteGroupAsync`/`SaveAllAsync` are applied by the
+  server all together or not at all.
+
+It does **not** provide cross-collection transactions, causal consistency, or offline execution for purely
+server-rendered UI.
 
 ## Project layout
 
@@ -39,6 +44,7 @@ src/BlazorSync/                     Protocol library (engine, clock, conflicts, 
                                     in-memory reference store and authority)
 src/BlazorSync.Storage.Sqlite/      Durable SQLite store for native hosts (MAUI, WPF, WinForms, console)
 src/BlazorSync.Server.AspNetCore/   ASP.NET Core endpoints for the protocol over any ISyncAuthority
+src/BlazorSync.Server.PostgreSql/   Durable PostgreSQL authority (Npgsql)
 src/BlazorSync.Transport.Http/      HTTP client transport (browser and native)
 src/BlazorSync.Storage.IndexedDb/   Durable browser store (IndexedDB) with a multi-tab replication lease
 src/BlazorSync.Testing/             Provider conformance cases (framework-free; also run in browsers)
@@ -46,6 +52,9 @@ src/BlazorSync.Blazor/              Blazor integration: ISyncCollection, local s
 src/BlazorSync.Samples.Shared/      Note model + NotesPanel component shared by the samples
 src/BlazorSync.Samples.Notes.*      Offline-capable notes PWA: ASP.NET Core server + WebAssembly client
 src/BlazorSync.Samples.WebApp*      Blazor Web App: one component in static SSR, Server, WebAssembly and Auto
+src/BlazorSync.Samples.Hybrid.Wpf/  WPF Blazor Hybrid app: SQLite replica, same NotesPanel
+src/BlazorSync.Samples.Hybrid.Maui/ .NET MAUI Blazor Hybrid app (Windows target; needs the maui-windows workload)
+src/BlazorSync.Tests.PostgreSql/    Authority conformance and PostgreSQL-specific tests (needs BLAZORSYNC_POSTGRES)
 src/BlazorSync.Tests.Browser/       Playwright tests (Chromium, Firefox, WebKit) and their WASM harness
 src/BlazorSync.Tests/               xUnit tests: unit, regression, provider conformance, wire fixtures,
                                     fault injection, process-kill, seeded randomized convergence
@@ -292,6 +301,41 @@ document is rejected with `base-expired` rather than resurrecting it; writing it
 `SyncResult.ResetPerformed`, `MissingAfterReset` and `PurgedAfterReset` report what happened. See
 `docs/protocol/v1.md` §4 and §6.1.
 
+## Groups: changes that belong together
+
+```csharp
+await engine.WriteGroupAsync([order, line1, line2]);          // or ISyncCollection.SaveAllAsync
+```
+
+The group is committed locally at once, uploaded in one request, and applied all together or not at all. If one
+change conflicts, the policy decides. A resolved change resends the group; a conflict kept for the user parks the
+others until it is resolved. Only authorities that advertise `groups` receive grouped changes (both included
+authorities do). See protocol §4.1.
+
+## A durable server: PostgreSQL
+
+```csharp
+var dataSource = NpgsqlDataSource.Create(connectionString);
+var authority = await PostgreSqlSyncAuthority<Note>.CreateAsync(new()
+{
+    DataSource = dataSource, DocumentType = AppJson.Default.Note, Collection = "notes",
+});
+app.MapSyncCollection("notes", authority, json, endpointOptions).RequireAuthorization();
+```
+
+- One instance serves every tenant: the caller's scope selects its feed.
+- Any number of server processes may share the database; commit hints reach clients of every process through
+  `LISTEN`/`NOTIFY`.
+- After restoring a backup, call `BeginNewEpochAsync(versionFloor)`. For retention, use `PurgeTombstonesAsync`
+  and `PurgeReceiptsAsync`.
+- Tests: `BLAZORSYNC_POSTGRES="Host=...;Username=...;Password=..." dotnet test src/BlazorSync.Tests.PostgreSql`.
+
+## Native apps (WPF, .NET MAUI)
+
+`src/BlazorSync.Samples.Hybrid.Wpf` and `src/BlazorSync.Samples.Hybrid.Maui` host the same `NotesPanel` in a
+`BlazorWebView`, with a SQLite replica registered through `AddLocalSyncCollection`. Sync pauses while the window
+is minimized or the app is in the background. Both have a `--smoke` mode that the tests use to drive the real UI.
+
 ## When something goes wrong
 
 - A rejected change stays parked: list it with `GetRejectedAsync`, fix the cause, then `RetryRejectedAsync`
@@ -393,12 +437,15 @@ dotnet run --project src/BlazorSync.Demo
 
 ```bash
 dotnet build src/BlazorSync.slnx -c Release
-dotnet test src/BlazorSync.slnx -c Release
+dotnet test src/BlazorSync.Tests -c Release                      # unit, conformance, HTTP, Blazor, recovery
+BLAZORSYNC_POSTGRES="Host=localhost;Username=postgres;Password=..." dotnet test src/BlazorSync.Tests.PostgreSql -c Release
 dotnet publish src/BlazorSync.Demo -c Release                              # optional
 dotnet publish src/BlazorSync.Demo -c Release -p:RunAOTCompilation=true    # needs the wasm-tools workload
 ```
 
-Browser tests (download Playwright's Chromium, Firefox and WebKit on first run, about 500 MB):
+Browser and desktop tests (download Playwright's Chromium, Firefox and WebKit on first run, about 500 MB). They
+also run the WPF sample on Windows, the MAUI sample with `-p:BuildMauiSample=true`, and the multi-process
+PostgreSQL test when `BLAZORSYNC_POSTGRES` is set:
 
 ```bash
 dotnet test src/BlazorSync.Tests.Browser -c Release

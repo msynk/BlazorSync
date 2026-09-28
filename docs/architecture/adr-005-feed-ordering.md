@@ -1,7 +1,7 @@
 # ADR-005: Server feed ordering
 
-- **Status:** Accepted for the reference authority; database algorithm proposed, to be proven in Phase 4
-  (2026-09-27)
+- **Status:** Accepted; implemented for the reference authority and for PostgreSQL (serialized per-feed
+  allocation, 2026-09-28)
 - **Invariants:** I03, I06, I09, I14
 
 ## Context
@@ -38,6 +38,25 @@ and test:
 Required tests before claiming I06: delayed lower-sequence commit (T27), rollback gap (T28), multiple
 application instances (T30), server restart.
 
+## PostgreSQL implementation (2026-09-28)
+
+Candidate 2 (serialized allocation) was chosen for v1, per feed (collection and scope), not per collection:
+
+- A push transaction locks its feed row with `SELECT … FOR UPDATE` and assigns versions from it.
+- It writes documents, receipts and the new sequence in the same transaction.
+- A second writer of the same feed waits for the lock. So a version can only become visible after every lower
+  version of that feed has committed or rolled back, and a rolled-back version is reused, never skipped.
+- Writers of different feeds do not wait for each other.
+
+Evidence (`BlazorSync.Tests.PostgreSql`, PostgreSQL 17.6):
+- `DelayedCommitIsNeverSkipped`: T27 and T28 with a real uncommitted transaction.
+- `ConcurrentInstancesKeepCommittedPrefix`: T30, with 12 writers on two instances and a continuous reader.
+  Removing the lock makes this test fail.
+- `SurvivesRestart`, and the shared conformance suite.
+
+Cost: one writer at a time per feed. Candidate 1 (`pg_snapshot_xmin` watermark) remains the option if
+per-feed write throughput becomes the bottleneck. No throughput measurement against PostgreSQL exists yet.
+
 ## Restores and epochs (implemented, 2026-09-27)
 
 - An authority whose history may have been lost starts a new epoch and continues its version sequence
@@ -49,8 +68,9 @@ application instances (T30), server restart.
 
 ## Retention
 
-Tombstones and receipts are retained indefinitely by the reference authority. A retention horizon and
-replica leases are Phase 8; an expired checkpoint must produce a reset, never a silent skip.
+Tombstones and receipts are purged explicitly (`PurgeTombstones`/`PurgeTombstonesAsync`,
+`PurgeReceipts`/`PurgeReceiptsAsync`). Purging tombstones raises a retention horizon: older checkpoints get
+`reset-required` with reason `expired`, never a silent skip (protocol §6.1).
 
 ## Tests
 

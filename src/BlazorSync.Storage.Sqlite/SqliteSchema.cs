@@ -6,7 +6,7 @@ namespace BlazorSync.Storage.Sqlite;
 /// <summary>The SQLite store's schema: creation, forward migration and the version check (ADR-004, I17).</summary>
 internal static class SqliteSchema
 {
-    public const int CurrentVersion = 2;
+    public const int CurrentVersion = 3;
 
     public const string DatabaseScope = "";
 
@@ -18,6 +18,9 @@ internal static class SqliteSchema
 
     /// <summary>The columns schema 2 added.</summary>
     public const string Version2Columns = "conflict_server, conflict_server_version, conflict_local, conflict_base";
+
+    /// <summary>The columns schema 3 added.</summary>
+    public const string Version3Columns = "group_id, group_members, pending_group, pending_group_size";
 
     private const string Version1 = """
         CREATE TABLE bs_meta (
@@ -68,6 +71,14 @@ internal static class SqliteSchema
         CREATE INDEX bs_records_conflicts ON bs_records (collection, id_key) WHERE conflict_local IS NOT NULL;
         """;
 
+    // 2 -> 3: dependency groups. Additive only.
+    private const string MigrationTo3 = """
+        ALTER TABLE bs_records ADD COLUMN group_id TEXT;
+        ALTER TABLE bs_records ADD COLUMN group_members TEXT;
+        ALTER TABLE bs_records ADD COLUMN pending_group TEXT;
+        ALTER TABLE bs_records ADD COLUMN pending_group_size INTEGER;
+        """;
+
     /// <summary>Creates the current schema, or upgrades an older one in place, in one transaction.</summary>
     /// <exception cref="SqliteStoreSchemaException">The database uses a newer schema; it is left untouched.</exception>
     public static async Task EnsureAsync(SqliteConnection connection, CancellationToken cancellationToken)
@@ -99,6 +110,11 @@ internal static class SqliteSchema
         if (version < 2)
         {
             await ExecuteAsync(connection, transaction, MigrationTo2, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (version < 3)
+        {
+            await ExecuteAsync(connection, transaction, MigrationTo3, cancellationToken).ConfigureAwait(false);
         }
 
         await ExecuteAsync(connection, transaction, $"PRAGMA user_version = {CurrentVersion}", cancellationToken).ConfigureAwait(false);

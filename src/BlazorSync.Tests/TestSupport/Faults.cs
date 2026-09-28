@@ -44,8 +44,15 @@ public sealed class InterceptingStore<T>(ILocalStore<T> inner) : ILocalStore<T>
 
     public Task<int> CountDirtyAsync(CancellationToken cancellationToken = default) => Inner.CountDirtyAsync(cancellationToken);
 
-    public Task<IReadOnlyList<T>> QueryAsync(bool includeDeleted = false, CancellationToken cancellationToken = default) =>
-        Inner.QueryAsync(includeDeleted, cancellationToken);
+    public int FullQueries => Volatile.Read(ref _fullQueries);
+
+    private int _fullQueries;
+
+    public Task<IReadOnlyList<T>> QueryAsync(bool includeDeleted = false, CancellationToken cancellationToken = default)
+    {
+        Interlocked.Increment(ref _fullQueries);
+        return Inner.QueryAsync(includeDeleted, cancellationToken);
+    }
 
     public Task<ReplicaCursor> GetCursorAsync(CancellationToken cancellationToken = default) => Inner.GetCursorAsync(cancellationToken);
 
@@ -57,6 +64,9 @@ public sealed class InterceptingStore<T>(ILocalStore<T> inner) : ILocalStore<T>
 
     public Task<IReadOnlyList<SyncRecord<T>>> GetRejectedAsync(int limit, CancellationToken cancellationToken = default) =>
         Inner.GetRejectedAsync(limit, cancellationToken);
+
+    public Task<IReadOnlyList<T>> QueryPageAsync(string? afterId, int limit, bool includeDeleted = false, CancellationToken cancellationToken = default) =>
+        Inner.QueryPageAsync(afterId, limit, includeDeleted, cancellationToken);
 
     public Task<int> PurgeAsync(IReadOnlyList<string> ids, long generation, CancellationToken cancellationToken = default) =>
         Inner.PurgeAsync(ids, generation, cancellationToken);

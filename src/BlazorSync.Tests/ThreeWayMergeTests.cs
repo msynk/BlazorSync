@@ -21,6 +21,8 @@ public sealed class Card : ISyncEntity
 
     public Address Address { get; set; } = new();
 
+    public int Views { get; set; }
+
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Due { get; set; }
 
@@ -150,6 +152,34 @@ public sealed class ThreeWayMergeTests
         var both = Merge(Edit(c => { c.Deleted = true; c.Title = "x"; }, 5), Edit(c => { c.Deleted = true; c.Title = "y"; }, 7));
         Assert.True(both.IsClean);
         Assert.True(both.SameAsServer);
+    }
+
+    private static readonly ThreeWayMergeOptions Semantic = new()
+    {
+        Sets = new HashSet<string>(StringComparer.Ordinal) { "/Tags" },
+        Counters = new HashSet<string>(StringComparer.Ordinal) { "/Views" },
+    };
+
+    [Fact(DisplayName = "I11: a member declared a set combines additions and removals from both sides")]
+    public void SetsMerge()
+    {
+        var result = ThreeWayMerge.Merge(Base(), Edit(c => c.Tags = ["a", "b", "c"], 5), Edit(c => c.Tags = ["b", "d"], 7), CardJsonContext.Default.Card, Semantic);
+
+        Assert.True(result.IsClean);
+        Assert.Equal(["b", "d", "c"], result.Merged.Tags);
+        Assert.Equal(["/Tags"], ThreeWayMerge.Merge(Base(), Edit(c => c.Tags = ["a", "b", "c"], 5), Edit(c => c.Tags = ["b", "d"], 7), CardJsonContext.Default.Card).Conflicts);
+    }
+
+    [Fact(DisplayName = "I11: a member declared a counter adds both sides' increments")]
+    public void CountersMerge()
+    {
+        var result = ThreeWayMerge.Merge(Edit(c => c.Views = 10, 1), Edit(c => c.Views = 12, 5), Edit(c => c.Views = 15, 7), CardJsonContext.Default.Card, Semantic);
+
+        Assert.True(result.IsClean);
+        Assert.Equal(17, result.Merged.Views);
+        var handler = new ThreeWayMergeConflictHandler<Card>(CardJsonContext.Default.Card, options: Semantic);
+        var resolution = handler.Resolve(new ConflictContext<Card>(Edit(c => c.Views = 15, 7), Edit(c => c.Views = 10, 1), Edit(c => c.Views = 12, 5)));
+        Assert.Equal((ConflictOutcome.UseResolved, 17), (resolution.Outcome, resolution.Resolved!.Views));
     }
 
     [Fact(DisplayName = "I02: merging never modifies its inputs")]

@@ -59,6 +59,9 @@ public sealed class SyncEngine<TDocument>
     private readonly KeyValuePair<string, object?> _nameTag;
     private Task? _initialization;
 
+    // What the server advertised on the last pull page (null: not known yet in this engine instance).
+    private volatile IReadOnlyList<string>? _serverFeatures;
+
     /// <summary>
     /// Creates an engine for one collection that clones documents with reflection-based JSON. Not
     /// trim/AOT safe; use the overload that takes a cloner in trimmed or AOT-compiled apps.
@@ -124,6 +127,10 @@ public sealed class SyncEngine<TDocument>
     /// <summary>Returns the app-visible documents in the local store.</summary>
     public Task<IReadOnlyList<TDocument>> QueryAsync(bool includeDeleted = false, CancellationToken cancellationToken = default) =>
         _store.QueryAsync(includeDeleted, cancellationToken);
+
+    /// <summary>Returns up to <paramref name="limit"/> app-visible documents after <paramref name="afterId"/>, in ordinal id order (bounded paging).</summary>
+    public Task<IReadOnlyList<TDocument>> QueryPageAsync(string? afterId, int limit, bool includeDeleted = false, CancellationToken cancellationToken = default) =>
+        _store.QueryPageAsync(afterId, limit, includeDeleted, cancellationToken);
 
     /// <summary>Returns the stored record (including sync metadata) for <paramref name="id"/>.</summary>
     public Task<SyncRecord<TDocument>?> GetAsync(string id, CancellationToken cancellationToken = default) =>
@@ -210,6 +217,58 @@ public sealed class SyncEngine<TDocument>
             : null;
     }
 
+    /// <summary>
+    /// Commits several local writes as one <b>dependency group</b>: they are stored atomically, uploaded in one request,
+    /// and the server applies them all or none (protocol §4.1). Use it for changes that are only meaningful together,
+    /// such as an order and its lines. Pass documents with <see cref="ISyncEntity.Deleted"/> set to delete them in the group.
+    /// </summary>
+    /// <remarks>
+    /// <para>If one change of the group conflicts or is rejected, nothing of the group is applied. A conflict resolved by
+    /// the conflict handler is resent with the rest of the group; a conflict kept for the user, a conflict settled with the
+    /// server state, or a rejection parks the other changes with <see cref="PushErrorCodes.GroupFailed"/>. Resolving
+    /// (<see cref="ResolveConflictAsync(string, TDocument, CancellationToken)"/>) or retrying (<see cref="RetryRejectedAsync"/>)
+    /// any member releases the parked ones.</para>
+    /// <para>Groups are sent only to servers that advertise <see cref="SyncFeatures.Groups"/>; with other servers the changes
+    /// are parked with <see cref="PushErrorCodes.GroupsUnsupported"/> instead of being applied one by one. A group is sent in
+    /// one request, so keep it within the server's operation limit.</para>
+    /// </remarks>
+    /// <exception cref="ArgumentException">The list is empty, or an id is invalid or repeated.</exception>
+    public async Task<IReadOnlyList<LocalWriteReceipt>> WriteGroupAsync(IReadOnlyList<TDocument> documents, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(documents);
+        if (documents.Count == 0)
+        {
+            throw new ArgumentException("A group needs at least one document.", nameof(documents));
+        }
+
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var document in documents)
+        {
+            ArgumentNullException.ThrowIfNull(document, nameof(documents));
+            SyncIds.Validate(document.Id, nameof(documents));
+            if (!ids.Add(document.Id))
+            {
+                throw new ArgumentException($"The document '{document.Id}' appears twice in the group.", nameof(documents));
+            }
+        }
+
+        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
+        var group = new SyncGroup(Guid.CreateVersion7().ToString("N"), [.. documents.Select(static d => d.Id)]);
+        var copies = documents.Select(document =>
+        {
+            var copy = _clone(document);
+            copy.UpdatedAt = _clock.Now();
+            return copy;
+        }).ToList();
+        var results = await CommitAsync(
+            SyncChangeKind.Local,
+            [.. copies.Select(copy => new RecordUpdate<TDocument>(copy.Id, existing => existing is null
+                ? new SyncRecord<TDocument>(copy, null, IsDirty: true) { LocalRevision = 1, Group = group }
+                : existing with { Current = copy, IsDirty = true, LocalRevision = existing.LocalRevision + 1, Rejection = null, MissingAfterReset = false, Group = group }))],
+            cancellationToken: cancellationToken).ConfigureAwait(false);
+        return [.. results.Select((result, i) => new LocalWriteReceipt(copies[i].Id, result.Record!.LocalRevision, copies[i].UpdatedAt))];
+    }
+
     /// <summary>Returns up to <paramref name="limit"/> records with an unresolved conflict.</summary>
     public Task<IReadOnlyList<SyncRecord<TDocument>>> GetConflictsAsync(int limit = 100, CancellationToken cancellationToken = default) =>
         _store.GetConflictsAsync(limit, cancellationToken);
@@ -232,7 +291,13 @@ public sealed class SyncEngine<TDocument>
                 ? null
                 : existing with { Current = copy, IsDirty = true, LocalRevision = existing.LocalRevision + 1, Rejection = null, Conflict = null, MissingAfterReset = false })],
             cancellationToken: cancellationToken).ConfigureAwait(false);
-        return results[0] is { Changed: true, Record: { } record } ? new LocalWriteReceipt(id, record.LocalRevision, copy.UpdatedAt) : null;
+        if (results[0] is not { Changed: true, Record: { } record })
+        {
+            return null;
+        }
+
+        await ReleaseGroupAsync(record.Group, cancellationToken).ConfigureAwait(false);
+        return new LocalWriteReceipt(id, record.LocalRevision, copy.UpdatedAt);
     }
 
     /// <summary>Discards a kept conflict: the local change is dropped and the server state stays. Returns whether one existed.</summary>
@@ -274,7 +339,42 @@ public sealed class SyncEngine<TDocument>
                 return existing with { Current = copy, IsDirty = true, LocalRevision = existing.LocalRevision + 1, Pending = null, Rejection = null };
             })],
             cancellationToken: cancellationToken).ConfigureAwait(false);
-        return results[0] is { Changed: true, Record: { } record } ? new LocalWriteReceipt(id, record.LocalRevision, stamp) : null;
+        if (results[0] is not { Changed: true, Record: { } record })
+        {
+            return null;
+        }
+
+        await ReleaseGroupAsync(record.Group, cancellationToken).ConfigureAwait(false);
+        return new LocalWriteReceipt(id, record.LocalRevision, stamp);
+    }
+
+    /// <summary>Clears the <see cref="PushErrorCodes.GroupFailed"/> and <see cref="PushErrorCodes.GroupsUnsupported"/> parking of a group's other changes.</summary>
+    private async Task ReleaseGroupAsync(SyncGroup? group, CancellationToken cancellationToken)
+    {
+        if (group is null)
+        {
+            return;
+        }
+
+        await CommitAsync(
+            SyncChangeKind.Local,
+            [.. group.Members.Select(member => new RecordUpdate<TDocument>(member, existing =>
+                existing is { Group: { } g, Rejection.ErrorCode: PushErrorCodes.GroupFailed or PushErrorCodes.GroupsUnsupported } && g.Id == group.Id
+                    ? existing with { Rejection = null, Pending = null }
+                    : null))],
+            cancellationToken: cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Parks the pushable changes of <paramref name="group"/> (a member failed, or groups are unsupported).</summary>
+    private async Task ParkGroupAsync(SyncGroup group, string code, string message, CancellationToken cancellationToken)
+    {
+        await CommitAsync(
+            SyncChangeKind.Sync,
+            [.. group.Members.Select(member => new RecordUpdate<TDocument>(member, existing =>
+                existing is { IsDirty: true, Rejection: null, Group: { } g } && g.Id == group.Id
+                    ? existing with { Rejection = new SyncRejection(existing.LocalRevision, code, message) }
+                    : null))],
+            cancellationToken: cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -578,6 +678,7 @@ public sealed class SyncEngine<TDocument>
             }
 
             ValidatePullPage(result, cursor.Checkpoint);
+            _serverFeatures = result.Features ?? [];
 
             var generation = cursor.Generation;
             var updates = new List<RecordUpdate<TDocument>>(result.Changes.Count);
@@ -772,6 +873,12 @@ public sealed class SyncEngine<TDocument>
                 break;
             }
 
+            candidates = await ExpandGroupsAsync(candidates, excluded, cancellationToken).ConfigureAwait(false);
+            if (candidates.Count == 0)
+            {
+                continue;
+            }
+
             var operations = await PrepareOperationsAsync(candidates, cancellationToken).ConfigureAwait(false);
             if (operations.Count == 0)
             {
@@ -806,6 +913,7 @@ public sealed class SyncEngine<TDocument>
             }
 
             var acknowledgements = new List<RecordUpdate<TDocument>>();
+            var failedGroups = new List<string>();
             foreach (var operation in operations)
             {
                 if (!outcomes.TryGetValue(operation.OperationId, out var outcome))
@@ -832,6 +940,16 @@ public sealed class SyncEngine<TDocument>
                             existing => ApplyRejected(existing, operation.OperationId, outcome)));
                         excluded.Add(operation.DocumentId);
                         rejected++;
+                        if (operation.Group is not null)
+                        {
+                            failedGroups.Add(operation.DocumentId);
+                        }
+
+                        break;
+
+                    case PushOutcomeKind.RetryLater when outcome.ErrorCode == PushErrorCodes.GroupAborted:
+                        // Not decided: the group goes again with the member that failed once that member is settled
+                        // (or is parked with it, or skipped with it if that member is excluded from this run).
                         break;
 
                     case PushOutcomeKind.RetryLater:
@@ -855,6 +973,24 @@ public sealed class SyncEngine<TDocument>
                         excluded.Add(operation.DocumentId);
                         deferred++;
                     }
+
+                    if (!stillPending && operation.Group is not null)
+                    {
+                        // Kept for the user, or settled with the server state: the group cannot be applied as a whole.
+                        failedGroups.Add(operation.DocumentId);
+                    }
+                }
+            }
+
+            foreach (var failed in failedGroups)
+            {
+                if (await _store.GetAsync(failed, cancellationToken).ConfigureAwait(false) is { Group: { } group })
+                {
+                    await ParkGroupAsync(group, PushErrorCodes.GroupFailed, $"Another change of the same group ('{failed}') was not accepted; resolve or retry it.", cancellationToken).ConfigureAwait(false);
+                    foreach (var member in group.Members)
+                    {
+                        excluded.Add(member);
+                    }
                 }
             }
         }
@@ -869,22 +1005,105 @@ public sealed class SyncEngine<TDocument>
     }
 
     /// <summary>
+    /// Adds every pending member of each dependency group among <paramref name="candidates"/>, so a group always travels in
+    /// one request. A group with a parked member is parked as a whole; groups wait for the server's features and are parked
+    /// if the server does not support them.
+    /// </summary>
+    private async Task<IReadOnlyList<SyncRecord<TDocument>>> ExpandGroupsAsync(
+        IReadOnlyList<SyncRecord<TDocument>> candidates,
+        HashSet<string> excluded,
+        CancellationToken cancellationToken)
+    {
+        if (candidates.All(static c => c.Group is null))
+        {
+            return candidates;
+        }
+
+        var expanded = new List<SyncRecord<TDocument>>(candidates.Count);
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var candidate in candidates)
+        {
+            if (!seen.Add(candidate.Current.Id))
+            {
+                continue;
+            }
+
+            if (candidate.Group is not { } group)
+            {
+                expanded.Add(candidate);
+                continue;
+            }
+
+            if (_serverFeatures is not { } features)
+            {
+                // Not known until the first pull of this engine (SyncAsync pulls first): wait.
+                excluded.Add(candidate.Current.Id);
+                continue;
+            }
+
+            if (!features.Contains(SyncFeatures.Groups, StringComparer.Ordinal))
+            {
+                await ParkGroupAsync(group, PushErrorCodes.GroupsUnsupported, "The server does not apply dependency groups atomically.", cancellationToken).ConfigureAwait(false);
+                excluded.UnionWith(group.Members);
+                continue;
+            }
+
+            if (group.Members.Any(excluded.Contains))
+            {
+                // A member is out of this run (retry-later, conflict budget): the group waits with it.
+                excluded.UnionWith(group.Members);
+                seen.UnionWith(group.Members);
+                continue;
+            }
+
+            var members = new List<SyncRecord<TDocument>>(group.Members.Count);
+            var blocked = false;
+            foreach (var id in group.Members)
+            {
+                var member = id == candidate.Current.Id ? candidate : await _store.GetAsync(id, cancellationToken).ConfigureAwait(false);
+                if (member is { IsDirty: true, Group: { } g } && g.Id == group.Id)
+                {
+                    blocked |= member.Rejection is not null;
+                    members.Add(member);
+                }
+            }
+
+            seen.UnionWith(group.Members);
+            if (blocked)
+            {
+                await ParkGroupAsync(group, PushErrorCodes.GroupFailed, "Another change of the same group is waiting for a decision.", cancellationToken).ConfigureAwait(false);
+                excluded.UnionWith(group.Members);
+                continue;
+            }
+
+            expanded.AddRange(members);
+        }
+
+        return expanded;
+    }
+
+    /// <summary>
     /// Persists a new immutable operation for each candidate that does not already have one, then returns
-    /// every candidate's pending operation. Existing pending operations are resent unchanged.
+    /// every candidate's pending operation. Existing pending operations are resent unchanged, unless the candidate's
+    /// dependency group changed since the operation was made (then a new operation replaces it: an operation that may
+    /// already have been applied carries an old base version, so resending under a new id conflicts and is never applied twice).
     /// </summary>
     private async Task<List<PushOperation<TDocument>>> PrepareOperationsAsync(
         IReadOnlyList<SyncRecord<TDocument>> candidates,
         CancellationToken cancellationToken)
     {
+        var groupSizes = candidates.Where(static c => c.Group is not null).GroupBy(static c => c.Group!.Id, StringComparer.Ordinal).ToDictionary(static g => g.Key, static g => g.Count(), StringComparer.Ordinal);
         var updates = new List<RecordUpdate<TDocument>>(candidates.Count);
         foreach (var candidate in candidates)
         {
             var operationId = Guid.CreateVersion7().ToString("N");
+            var group = candidate.Group?.Id;
+            var size = group is null ? 0 : groupSizes[group];
             updates.Add(new RecordUpdate<TDocument>(candidate.Current.Id, existing =>
-                existing is { IsPushable: true, Pending: null }
+                existing is { IsPushable: true } && (existing.Pending is null || existing.Pending.Group != group || existing.Pending.GroupSize != size) && existing.Group?.Id == group
                     ? existing with
                     {
-                        Pending = new PendingOperation<TDocument>(operationId, existing.LocalRevision, existing.BaseVersion, existing.Current),
+                        Pending = new PendingOperation<TDocument>(operationId, existing.LocalRevision, existing.BaseVersion, existing.Current) { Group = group, GroupSize = size },
                     }
                     : null));
         }
@@ -895,11 +1114,12 @@ public sealed class SyncEngine<TDocument>
         {
             if (result.Record is { IsPushable: true, Pending: { } pending } record)
             {
-                operations.Add(new PushOperation<TDocument>(pending.OperationId, record.Current.Id, pending.BaseVersion, pending.Payload));
+                operations.Add(new PushOperation<TDocument>(pending.OperationId, record.Current.Id, pending.BaseVersion, pending.Payload) { Group = pending.Group, GroupSize = pending.GroupSize });
             }
         }
 
-        return operations;
+        // A group whose members changed while preparing is not sent incomplete.
+        return [.. operations.Where(o => o.Group is null || operations.Count(other => other.Group == o.Group) == o.GroupSize)];
     }
 
     private static Dictionary<string, PushOutcome<TDocument>> CorrelateOutcomes(
@@ -952,7 +1172,14 @@ public sealed class SyncEngine<TDocument>
         }
 
         var confirmed = outcome.Document!;
-        var rebased = existing with { Base = _clone(confirmed), BaseVersion = outcome.Version, Pending = null, Generation = generation };
+        var rebased = existing with
+        {
+            Base = _clone(confirmed),
+            BaseVersion = outcome.Version,
+            Pending = null,
+            Generation = generation,
+            Group = pending.Group is not null && existing.Group?.Id == pending.Group ? null : existing.Group,
+        };
 
         // Only the revision that was sent becomes clean; a later local edit stays dirty on the new base.
         return Settle(existing.LocalRevision == pending.Revision

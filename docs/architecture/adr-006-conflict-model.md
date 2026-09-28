@@ -1,6 +1,6 @@
 # ADR-006: Conflict model and defaults
 
-- **Status:** Accepted (Phase 1); Phase 8 decisions accepted 2026-09-28
+- **Status:** Accepted (Phase 1); Phase 8 decisions, dependency groups and semantic merges accepted 2026-09-28
 - **Invariants:** I02, I10, I11, I19
 
 ## Context
@@ -62,10 +62,19 @@ computed from an older local state to a newer one, and made LWW depend on upload
   `base-expired` (the replica clears its base), and writing the document again recreates it explicitly
   (protocol §4).
 
-## Not decided yet
+## Decision (dependency groups and semantic merges, 2026-09-28)
 
-- Dependency groups (several documents that must be applied together) and fairness between them (I19).
-- Semantic merges for counters and sets.
+- **Dependency groups** (protocol §4.1). The API is `SyncEngine.WriteGroupAsync` and
+  `ISyncCollection.SaveAllAsync`.
+  - The group is committed locally in one transaction, sent in one request, and applied by the authority all
+    or nothing. The in-memory authority evaluates every member before committing; PostgreSQL uses a savepoint.
+  - An aborted member gets `retry-later`/`group-aborted` and no receipt.
+  - A conflict resolved by the policy resends the group. A conflict kept for the user, settled with the server
+    state, or rejected parks the other members with `group-failed` until it is resolved or retried.
+  - Groups are sent only to authorities that advertise `"groups"`; otherwise they are parked with
+    `groups-unsupported`, never sent piecemeal.
+- **Semantic merges.** `ThreeWayMergeOptions` names members to merge as sets (additions and removals from both
+  sides combine) or counters (`server + local − base`). Every other member keeps the atomic rules.
 
 ## Alternatives
 
@@ -87,5 +96,6 @@ state.
 `S04`, `S10`, `ConflictBudget`, `EditDuringConflictResolution`, `MergeResolutionIsPushed`,
 `DeleteVersusUpdate`, `ConflictHandlerTests`; Phase 8: `ConflictResolutionTests` (default keeps, resolve,
 discard, restart on SQLite, SQLite migration), `ThreeWayMergeTests`, `SelectiveSyncTests.RevokedConflictIsKept`,
-`BlazorIntegrationTests.ConflictsThroughCollection`, `NotesSampleTests.ConflictIsShownAndResolved` (two browser devices, Chromium/Firefox/WebKit), store conformance cases for conflicts and purge, and the
+`BlazorIntegrationTests.ConflictsThroughCollection`, `SaveAllIsAtomic`, `GroupTests`, `PostgreSqlAuthorityTests.GroupsAreAtomic`,
+`ThreeWayMergeTests.SetsMerge`/`CountersMerge`, randomized schedules with groups, `NotesSampleTests.ConflictIsShownAndResolved` (two browser devices, Chromium/Firefox/WebKit), store conformance cases for conflicts and purge, and the
 IndexedDB schema migration browser test.

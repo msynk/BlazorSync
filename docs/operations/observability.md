@@ -83,4 +83,7 @@ ASP.NET Core's own `http.server.*` metrics and request logs cover transport-leve
   leaked details.
 - `BlazorIntegrationTests.UnexpectedFailureIsReportedAndRecovers` and `RecipeUsesContainerLogging`.
 
-Not verified: an OpenTelemetry exporter end to end (no collector here), and browser-side telemetry export.
+- `OpenTelemetryExportTests`: the documented `AddSource`/`AddMeter` wiring exports the spans and the client and
+  server metrics through the OpenTelemetry SDK (1.18.0, in-memory exporter).
+
+Not verified: an OTLP collector over the network, and browser-side telemetry export.

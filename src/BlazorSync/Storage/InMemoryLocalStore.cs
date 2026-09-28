@@ -150,6 +150,22 @@ public sealed class InMemoryLocalStore<TDocument> : ILocalStore<TDocument>
     }
 
     /// <inheritdoc />
+    public Task<IReadOnlyList<TDocument>> QueryPageAsync(string? afterId, int limit, bool includeDeleted = false, CancellationToken cancellationToken = default)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+        lock (_gate)
+        {
+            var documents = _records.Values
+                .Where(r => !r.MissingAfterReset && (includeDeleted || !r.Current.Deleted) && (afterId is null || string.CompareOrdinal(r.Current.Id, afterId) > 0))
+                .OrderBy(static r => r.Current.Id, StringComparer.Ordinal)
+                .Take(limit)
+                .Select(r => _clone(r.Current))
+                .ToList();
+            return Task.FromResult<IReadOnlyList<TDocument>>(documents);
+        }
+    }
+
+    /// <inheritdoc />
     public Task<ReplicaCursor> GetCursorAsync(CancellationToken cancellationToken = default)
     {
         lock (_gate)

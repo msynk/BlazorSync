@@ -95,7 +95,7 @@ public sealed class SqliteLocalStore<TDocument> : ILocalStore<TDocument>
     private const string Columns =
         "id, current, base, base_version, is_dirty, local_revision, pending_id, pending_revision, pending_base_version, " +
         "pending_payload, rejection_revision, rejection_code, rejection_message, observed, observed_version, generation, missing, " +
-        "conflict_server, conflict_server_version, conflict_local, conflict_base";
+        "conflict_server, conflict_server_version, conflict_local, conflict_base, group_id, group_members, pending_group, pending_group_size";
 
     private readonly string _connectionString;
     private readonly string _collection;
@@ -259,8 +259,8 @@ public sealed class SqliteLocalStore<TDocument> : ILocalStore<TDocument>
                 while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
                 {
                     rows++;
-                    lastUpdatedAt = reader.GetString(21);
-                    lastKey = (byte[])reader.GetValue(22);
+                    lastUpdatedAt = reader.GetString(25);
+                    lastKey = (byte[])reader.GetValue(26);
                     var record = ReadRecord(reader);
                     if ((exclude is null || !exclude.Contains(record.Current.Id)) && found.Count < limit)
                     {
@@ -362,6 +362,30 @@ public sealed class SqliteLocalStore<TDocument> : ILocalStore<TDocument>
             "SELECT current FROM bs_records WHERE collection = $c AND missing = 0 AND ($all = 1 OR deleted = 0) ORDER BY id_key";
         command.Parameters.AddWithValue("$c", _collection);
         command.Parameters.AddWithValue("$all", includeDeleted ? 1 : 0);
+        var documents = new List<TDocument>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            documents.Add(Deserialize(reader.GetString(0)));
+        }
+
+        return documents;
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<TDocument>> QueryPageAsync(string? afterId, int limit, bool includeDeleted = false, CancellationToken cancellationToken = default)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+        await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+
+        // The partial index bs_records_visible (collection, id_key) WHERE missing = 0 serves the range and the order.
+        command.CommandText =
+            "SELECT current FROM bs_records WHERE collection = $c AND missing = 0 AND ($all = 1 OR deleted = 0) AND ($after IS NULL OR id_key > $after) ORDER BY id_key LIMIT $n";
+        command.Parameters.AddWithValue("$c", _collection);
+        command.Parameters.AddWithValue("$all", includeDeleted ? 1 : 0);
+        command.Parameters.AddWithValue("$after", afterId is null ? DBNull.Value : OrdinalKey(afterId));
+        command.Parameters.AddWithValue("$n", limit);
         var documents = new List<TDocument>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
@@ -532,7 +556,11 @@ public sealed class SqliteLocalStore<TDocument> : ILocalStore<TDocument>
             LocalRevision = reader.GetInt64(5),
             Pending = pendingId is null
                 ? null
-                : new PendingOperation<TDocument>(pendingId, reader.GetInt64(7), NullableInt64(8), Deserialize(reader.GetString(9))),
+                : new PendingOperation<TDocument>(pendingId, reader.GetInt64(7), NullableInt64(8), Deserialize(reader.GetString(9)))
+                {
+                    Group = NullableString(23),
+                    GroupSize = reader.IsDBNull(24) ? 0 : reader.GetInt32(24),
+                },
             Rejection = rejectionCode is null ? null : new SyncRejection(reader.GetInt64(10), rejectionCode, NullableString(12)),
             Observed = observed is null ? null : Deserialize(observed),
             ObservedVersion = NullableInt64(14),
@@ -545,6 +573,9 @@ public sealed class SqliteLocalStore<TDocument> : ILocalStore<TDocument>
                     reader.GetInt64(18),
                     Deserialize(reader.GetString(19)),
                     NullableString(20) is { } conflictBase ? Deserialize(conflictBase) : null),
+            Group = NullableString(21) is { } groupId
+                ? new SyncGroup(groupId, JsonSerializer.Deserialize(reader.GetString(22), SqliteJson.Default.StringArray)!)
+                : null,
         };
     }
 
@@ -557,11 +588,13 @@ public sealed class SqliteLocalStore<TDocument> : ILocalStore<TDocument>
                 collection, id, id_key, current, updated_at, deleted, base, base_version, is_dirty, local_revision,
                 pending_id, pending_revision, pending_base_version, pending_payload,
                 rejection_revision, rejection_code, rejection_message, observed, observed_version, generation, missing,
-                conflict_server, conflict_server_version, conflict_local, conflict_base)
+                conflict_server, conflict_server_version, conflict_local, conflict_base,
+                group_id, group_members, pending_group, pending_group_size)
             VALUES ($c, $id, $key, $current, $updated, $deleted, $base, $baseVersion, $dirty, $revision,
                 $pendingId, $pendingRevision, $pendingBase, $pendingPayload,
                 $rejectionRevision, $rejectionCode, $rejectionMessage, $observed, $observedVersion, $generation, $missing,
-                $conflictServer, $conflictServerVersion, $conflictLocal, $conflictBase)
+                $conflictServer, $conflictServerVersion, $conflictLocal, $conflictBase,
+                $groupId, $groupMembers, $pendingGroup, $pendingGroupSize)
             """;
         var p = command.Parameters;
         p.AddWithValue("$c", _collection);
@@ -589,6 +622,10 @@ public sealed class SqliteLocalStore<TDocument> : ILocalStore<TDocument>
         p.AddWithValue("$conflictServerVersion", (object?)record.Conflict?.ServerVersion ?? DBNull.Value);
         p.AddWithValue("$conflictLocal", record.Conflict is { } cl ? Serialize(cl.Local) : DBNull.Value);
         p.AddWithValue("$conflictBase", record.Conflict?.Base is { } cb ? Serialize(cb) : DBNull.Value);
+        p.AddWithValue("$groupId", (object?)record.Group?.Id ?? DBNull.Value);
+        p.AddWithValue("$groupMembers", record.Group is { } g ? JsonSerializer.Serialize(g.Members.ToArray(), SqliteJson.Default.StringArray) : DBNull.Value);
+        p.AddWithValue("$pendingGroup", (object?)record.Pending?.Group ?? DBNull.Value);
+        p.AddWithValue("$pendingGroupSize", record.Pending is { Group: not null } pg ? pg.GroupSize : DBNull.Value);
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
@@ -597,3 +634,7 @@ public sealed class SqliteLocalStore<TDocument> : ILocalStore<TDocument>
     private TDocument Deserialize(string json) =>
         JsonSerializer.Deserialize(json, _typeInfo) ?? throw new InvalidDataException("A stored document deserialized to null.");
 }
+
+/// <summary>Source-generated JSON for the store's own metadata columns.</summary>
+[System.Text.Json.Serialization.JsonSerializable(typeof(string[]))]
+internal sealed partial class SqliteJson : System.Text.Json.Serialization.JsonSerializerContext;

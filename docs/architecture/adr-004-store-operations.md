@@ -55,6 +55,13 @@ page and its checkpoint could be persisted separately.
   `PurgeMissing` flag so an interrupted purge sweep resumes with the same meaning. SQLite and IndexedDB are
   at schema 2; both upgrade schema 1 in place without touching existing rows (tested with a pending
   operation in each).
+- Later on 2026-09-28:
+  - Stores persist `SyncRecord.Group` and a pending operation's `Group`/`GroupSize` (dependency groups;
+    SQLite schema 3 adds four columns, IndexedDB schema 3 adds fields only).
+  - They list rejected records (`GetRejectedAsync`) and serve bounded pages in id order from an index
+    (`QueryPageAsync`).
+  - `LocalSyncCollection` uses these pages for default-ordered queries, so it never loads the whole collection
+    for them.
 
 ## Consequences
 

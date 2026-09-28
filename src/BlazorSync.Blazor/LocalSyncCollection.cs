@@ -59,7 +59,30 @@ public sealed class LocalSyncCollection<TDocument> : ISyncCollection<TDocument>
     public async Task<IReadOnlyList<TDocument>> QueryAsync(SyncQuery<TDocument>? query = null, CancellationToken cancellationToken = default)
     {
         var engine = await EngineAsync(cancellationToken).ConfigureAwait(false);
-        return Queries.Apply(await engine.QueryAsync(cancellationToken: cancellationToken).ConfigureAwait(false), query);
+        query ??= new SyncQuery<TDocument>();
+        if (query.Order is not null)
+        {
+            return Queries.Apply(await engine.QueryAsync(cancellationToken: cancellationToken).ConfigureAwait(false), query);
+        }
+
+        // The default order is by id, which is the store's index order: walk it in pages and stop at the limit, so
+        // memory stays bounded by the page size however large the collection is.
+        Queries.Validate(query);
+        var matches = new List<TDocument>(query.Limit);
+        string? after = null;
+        while (matches.Count < query.Limit)
+        {
+            var page = await engine.QueryPageAsync(after, Queries.PageSize, cancellationToken: cancellationToken).ConfigureAwait(false);
+            if (page.Count == 0)
+            {
+                break;
+            }
+
+            matches.AddRange(page.Where(d => query.Where?.Invoke(d) ?? true).Take(query.Limit - matches.Count));
+            after = page[^1].Id;
+        }
+
+        return matches;
     }
 
     /// <inheritdoc />
@@ -70,6 +93,16 @@ public sealed class LocalSyncCollection<TDocument> : ISyncCollection<TDocument>
         var receipt = await engine.WriteAsync(document, cancellationToken).ConfigureAwait(false);
         await _session.NotifyLocalWriteAsync(cancellationToken).ConfigureAwait(false);
         return new SyncWriteResult(receipt.Id, SyncConfirmation.SavedLocally);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<SyncWriteResult>> SaveAllAsync(IReadOnlyList<TDocument> documents, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(documents);
+        var engine = await EngineAsync(cancellationToken).ConfigureAwait(false);
+        var receipts = await engine.WriteGroupAsync(documents, cancellationToken).ConfigureAwait(false);
+        await _session.NotifyLocalWriteAsync(cancellationToken).ConfigureAwait(false);
+        return [.. receipts.Select(static r => new SyncWriteResult(r.Id, SyncConfirmation.SavedLocally))];
     }
 
     /// <inheritdoc />

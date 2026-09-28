@@ -17,9 +17,12 @@ namespace BlazorSync.Tests.Blazor;
 /// <summary>ADR-007: the component-facing collection, the local session loop and the server-connected collection.</summary>
 public sealed class BlazorIntegrationTests
 {
+    // A wall-clock deadline: counting Task.Delay(10) iterations depends on the OS timer resolution (about 15 ms on
+    // Windows) and on machine load, which made the effective budget vary between runs.
     private static async Task WaitUntil(Func<bool> condition, string what)
     {
-        for (var i = 0; i < 500; i++)
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        while (watch.Elapsed < TimeSpan.FromSeconds(10))
         {
             if (condition())
             {
@@ -29,7 +32,7 @@ public sealed class BlazorIntegrationTests
             await Task.Delay(10);
         }
 
-        Assert.Fail($"Timed out waiting for: {what}");
+        Assert.Fail($"Timed out after {watch.Elapsed.TotalSeconds:F1} s waiting for: {what}");
     }
 
     /// <summary>A local-replica session over per-account in-memory stores (they survive session restarts, like device storage).</summary>
@@ -663,6 +666,34 @@ public sealed class BlazorIntegrationTests
         Assert.False(alice.Capabilities.DurableOfflineWrites);
     }
 
+    [Fact(DisplayName = "I19: SaveAllAsync writes a group all-or-nothing on server-connected and local hosts")]
+    public async Task SaveAllIsAtomic()
+    {
+        var authority = new InMemorySyncServer<Note>(NoteJson.ServerOptions());
+        using var alice = ServerCollection(authority);
+        using var bob = ServerCollection(authority, "bob");
+        Assert.All(await alice.SaveAllAsync([new Note { Id = "order", Title = "1" }, new Note { Id = "line", Title = "1" }]), r => Assert.Equal(SyncConfirmation.AcceptedByServer, r.Confirmation));
+        var bobsOrder = (await bob.GetAsync("order"))!;
+        var bobsLine = (await bob.GetAsync("line"))!;
+        var alicesLine = (await alice.GetAsync("line"))!;
+        alicesLine.Title = "changed by alice";
+        await alice.SaveAsync(alicesLine);
+
+        bobsOrder.Title = "2";
+        bobsLine.Title = "stale";
+        var results = await bob.SaveAllAsync([bobsOrder, bobsLine]);
+
+        Assert.All(results, r => Assert.Equal(SyncConfirmation.Conflict, r.Confirmation));
+        Assert.Equal("1", (await alice.GetAsync("order"))!.Title); // nothing of the group was written
+
+        var harness = new LocalHarness();
+        await using var _ = harness.Session;
+        var saved = await harness.Collection.SaveAllAsync([new Note { Id = "a", Title = "1" }, new Note { Id = "b", Title = "2" }]);
+        Assert.All(saved, r => Assert.Equal(SyncConfirmation.SavedLocally, r.Confirmation));
+        await WaitUntil(() => harness.Collection.Status is { State: SyncState.Synced, Pending: 0 }, "group uploaded");
+        Assert.Equal(["a", "b"], harness.Server.Server.Snapshot().Select(n => n.Id).Order());
+    }
+
     [Fact(DisplayName = "I05: a server-connected save of a document it never read cannot overwrite it")]
     public async Task ServerCollectionNeverOverwritesUnseen()
     {
@@ -744,6 +775,28 @@ public sealed class BlazorIntegrationTests
         await writer.SaveAsync(new Note { Id = "n3" });
         Assert.Equal(1, hints);
         Assert.Equal(0, reader.SubscriberCount);
+    }
+
+    [Fact(DisplayName = "I08: a default-ordered query on a local replica reads bounded pages and never the whole collection")]
+    public async Task DefaultOrderQueriesArePaged()
+    {
+        var store = new InterceptingStore<Note>(new InMemoryLocalStore<Note>(NoteJson.Clone));
+        await store.UpdateAsync(Enumerable.Range(0, 1000).Select(i => new RecordUpdate<Note>($"n{i:D4}", _ => new SyncRecord<Note>(new Note { Id = $"n{i:D4}", Title = i % 3 == 0 ? "match" : "other", Deleted = i == 3 }, null, false))).ToList());
+        await using var session = new SyncSession<Note>(new SyncSessionOptions<Note>
+        {
+            OpenReplica = (_, _) => Task.FromResult(new LocalReplica<Note>(store, "node")),
+            CreateTransport = _ => new ServerRefTransport(InMemorySyncServerRef.Create()),
+            Cloner = NoteJson.Clone,
+            Interval = TimeSpan.FromHours(1),
+        });
+        var collection = new LocalSyncCollection<Note>(session, _ => Task.FromResult("a"));
+
+        var page = await collection.QueryAsync(new SyncQuery<Note> { Where = n => n.Title == "match", Limit = 5 });
+        var ordered = await collection.QueryAsync(new SyncQuery<Note> { Order = (a, b) => string.CompareOrdinal(b.Id, a.Id), Limit = 2 });
+
+        Assert.Equal(["n0000", "n0006", "n0009", "n0012", "n0015"], page.Select(n => n.Id)); // n0003 is deleted
+        Assert.Equal(["n0999", "n0998"], ordered.Select(n => n.Id));
+        Assert.Equal(1, store.FullQueries); // only the custom order read everything
     }
 
     [Fact(DisplayName = "I08: queries filter, order and bound their results")]

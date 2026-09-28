@@ -264,6 +264,14 @@ public sealed partial class IndexedDbLocalStore<TDocument> : ILocalStore<TDocume
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<TDocument>> QueryPageAsync(string? afterId, int limit, bool includeDeleted = false, CancellationToken cancellationToken = default)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+        var json = await Call(() => _module.InvokeAsync<string>("queryPage", cancellationToken, _handle, _collection, afterId, limit, includeDeleted)).ConfigureAwait(false);
+        return JsonSerializer.Deserialize(json, IdbJsonContext.Default.ListString)!.Select(Deserialize).ToList();
+    }
+
+    /// <inheritdoc />
     public async Task<ReplicaCursor> GetCursorAsync(CancellationToken cancellationToken = default)
     {
         var meta = await GetMetaAsync(cancellationToken).ConfigureAwait(false);
@@ -401,6 +409,10 @@ public sealed partial class IndexedDbLocalStore<TDocument> : ILocalStore<TDocume
         ConflictServerVersion = Text(record.Conflict?.ServerVersion),
         ConflictLocal = record.Conflict is { } cl ? Serialize(cl.Local) : null,
         ConflictBase = record.Conflict?.Base is { } cb ? Serialize(cb) : null,
+        GroupId = record.Group?.Id,
+        GroupMembers = record.Group?.Members.ToList(),
+        PendingGroup = record.Pending?.Group,
+        PendingGroupSize = record.Pending is { Group: not null } pending ? pending.GroupSize : null,
     };
 
     private SyncRecord<TDocument> ToRecord(IdbRecord dto) =>
@@ -410,7 +422,11 @@ public sealed partial class IndexedDbLocalStore<TDocument> : ILocalStore<TDocume
             LocalRevision = Number(dto.LocalRevision) ?? 0,
             Pending = dto.PendingId is null
                 ? null
-                : new PendingOperation<TDocument>(dto.PendingId, Number(dto.PendingRevision) ?? 0, Number(dto.PendingBaseVersion), Deserialize(dto.PendingPayload!)),
+                : new PendingOperation<TDocument>(dto.PendingId, Number(dto.PendingRevision) ?? 0, Number(dto.PendingBaseVersion), Deserialize(dto.PendingPayload!))
+                {
+                    Group = dto.PendingGroup,
+                    GroupSize = dto.PendingGroupSize ?? 0,
+                },
             Rejection = dto.RejectionCode is null ? null : new SyncRejection(Number(dto.RejectionRevision) ?? 0, dto.RejectionCode, dto.RejectionMessage),
             Observed = dto.Observed is null ? null : Deserialize(dto.Observed),
             ObservedVersion = Number(dto.ObservedVersion),
@@ -423,6 +439,7 @@ public sealed partial class IndexedDbLocalStore<TDocument> : ILocalStore<TDocume
                     Number(dto.ConflictServerVersion) ?? 0,
                     Deserialize(dto.ConflictLocal),
                     dto.ConflictBase is null ? null : Deserialize(dto.ConflictBase)),
+            Group = dto.GroupId is null ? null : new SyncGroup(dto.GroupId, dto.GroupMembers ?? []),
         };
 
     private string Serialize(TDocument document) => JsonSerializer.Serialize(document, _typeInfo);
@@ -481,6 +498,14 @@ internal sealed class IdbRecord
     public string? ConflictLocal { get; set; }
 
     public string? ConflictBase { get; set; }
+
+    public string? GroupId { get; set; }
+
+    public List<string>? GroupMembers { get; set; }
+
+    public string? PendingGroup { get; set; }
+
+    public int? PendingGroupSize { get; set; }
 }
 
 internal sealed record IdbCommitEntry(string Id, IdbRecord? Record, string? ExpectedStamp);

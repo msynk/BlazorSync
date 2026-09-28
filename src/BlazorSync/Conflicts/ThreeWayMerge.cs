@@ -17,7 +17,8 @@ namespace BlazorSync.Conflicts;
 /// <see cref="ThreeWayMergeResult{TDocument}.Merged"/> and the member's JSON Pointer is reported.</item>
 /// <item>Objects merge member by member. An absent member differs from a member set to <c>null</c>
 /// (removing a member is a change). Arrays, strings and numbers are atomic values: two different edits of one
-/// array conflict even if they touched different elements; sets and counters are not merged semantically.</item>
+/// array conflict even if they touched different elements, unless <see cref="ThreeWayMergeOptions"/> declares the
+/// member a set (additions and removals from both sides combine) or a counter (both sides' increments add up).</item>
 /// <item>Members captured by <c>[JsonExtensionData]</c> (fields unknown to this version) merge like any other
 /// member, so neither side loses them.</item>
 /// <item><see cref="ISyncEntity.UpdatedAt"/> is not merged (a resolution is re-stamped when it is written).
@@ -36,8 +37,14 @@ public static class ThreeWayMerge
     /// modified.
     /// </returns>
     public static ThreeWayMergeResult<TDocument> Merge<TDocument>(TDocument @base, TDocument local, TDocument server, JsonTypeInfo<TDocument> typeInfo)
+        where TDocument : class, ISyncEntity =>
+        Merge(@base, local, server, typeInfo, ThreeWayMergeOptions.Default);
+
+    /// <summary>Merges with semantic rules for the members named in <paramref name="options"/>.</summary>
+    public static ThreeWayMergeResult<TDocument> Merge<TDocument>(TDocument @base, TDocument local, TDocument server, JsonTypeInfo<TDocument> typeInfo, ThreeWayMergeOptions options)
         where TDocument : class, ISyncEntity
     {
+        ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(@base);
         ArgumentNullException.ThrowIfNull(local);
         ArgumentNullException.ThrowIfNull(server);
@@ -56,7 +63,7 @@ public static class ThreeWayMerge
         }
         else
         {
-            merged = MergeSlot(new Slot(true, baseNode), new Slot(true, localNode), new Slot(true, serverNode), string.Empty, conflicts).Value;
+            merged = MergeSlot(new Slot(true, baseNode), new Slot(true, localNode), new Slot(true, serverNode), string.Empty, conflicts, options).Value;
             deleted = server.Deleted;
             if (local.Deleted != server.Deleted)
             {
@@ -95,7 +102,7 @@ public static class ThreeWayMerge
 
     private static bool Same(Slot a, Slot b) => a.Present == b.Present && (!a.Present || JsonNode.DeepEquals(a.Value, b.Value));
 
-    private static Slot MergeSlot(Slot @base, Slot local, Slot server, string path, List<string> conflicts)
+    private static Slot MergeSlot(Slot @base, Slot local, Slot server, string path, List<string> conflicts, ThreeWayMergeOptions options)
     {
         if (Same(local, server) || Same(@base, server))
         {
@@ -109,23 +116,65 @@ public static class ThreeWayMerge
 
         if (@base.Value is JsonObject baseObject && local.Value is JsonObject localObject && server.Value is JsonObject serverObject)
         {
-            return new Slot(true, MergeObject(baseObject, localObject, serverObject, path, conflicts));
+            return new Slot(true, MergeObject(baseObject, localObject, serverObject, path, conflicts, options));
+        }
+
+        if (options.Sets.Contains(path) && AsArray(@base) is { } baseItems && AsArray(local) is { } localItems && AsArray(server) is { } serverItems)
+        {
+            return new Slot(true, MergeSet(baseItems, localItems, serverItems));
+        }
+
+        if (options.Counters.Contains(path) && AsNumber(@base) is { } baseCount && AsNumber(local) is { } localCount && AsNumber(server) is { } serverCount)
+        {
+            return new Slot(true, JsonValue.Create(serverCount + (localCount - baseCount)));
         }
 
         conflicts.Add(path.Length == 0 ? "/" : path);
         return server;
     }
 
-    private static JsonObject MergeObject(JsonObject @base, JsonObject local, JsonObject server, string path, List<string> conflicts)
+    private static JsonObject MergeObject(JsonObject @base, JsonObject local, JsonObject server, string path, List<string> conflicts, ThreeWayMergeOptions options)
     {
         var result = new JsonObject();
         var keys = server.Select(p => p.Key).Concat(local.Select(p => p.Key)).Concat(@base.Select(p => p.Key)).Distinct(StringComparer.Ordinal);
         foreach (var key in keys)
         {
-            var slot = MergeSlot(Get(@base, key), Get(local, key), Get(server, key), $"{path}/{key.Replace("~", "~0", StringComparison.Ordinal).Replace("/", "~1", StringComparison.Ordinal)}", conflicts);
+            var slot = MergeSlot(Get(@base, key), Get(local, key), Get(server, key), $"{path}/{key.Replace("~", "~0", StringComparison.Ordinal).Replace("/", "~1", StringComparison.Ordinal)}", conflicts, options);
             if (slot.Present)
             {
                 result[key] = slot.Value?.DeepClone();
+            }
+        }
+
+        return result;
+    }
+
+    // An absent or null member counts as an empty set or zero, so a set or counter added on both sides still merges.
+    private static List<JsonNode?>? AsArray(Slot slot) => slot switch
+    {
+        { Present: false } or { Value: null } => [],
+        { Value: JsonArray array } => [.. array],
+        _ => null,
+    };
+
+    private static decimal? AsNumber(Slot slot) => slot switch
+    {
+        { Present: false } or { Value: null } => 0m,
+        { Value: JsonValue value } when value.TryGetValue<decimal>(out var number) => number,
+        { Value: JsonValue value } when value.GetValueKind() == JsonValueKind.Number => decimal.Parse(value.ToJsonString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture),
+        _ => null,
+    };
+
+    // Server order, then local additions in local order; an item removed on either side is removed.
+    private static JsonArray MergeSet(List<JsonNode?> @base, List<JsonNode?> local, List<JsonNode?> server)
+    {
+        static bool Contains(List<JsonNode?> items, JsonNode? item) => items.Any(i => JsonNode.DeepEquals(i, item));
+        var result = new JsonArray();
+        foreach (var item in server.Where(i => Contains(local, i) || !Contains(@base, i)).Concat(local.Where(i => !Contains(@base, i) && !Contains(server, i))))
+        {
+            if (!result.Any(existing => JsonNode.DeepEquals(existing, item)))
+            {
+                result.Add(item?.DeepClone());
             }
         }
 
@@ -136,7 +185,26 @@ public static class ThreeWayMerge
         node.TryGetPropertyValue(key, out var value) ? new Slot(true, value) : new Slot(false, null);
 }
 
-/// <summary>The result of <see cref="ThreeWayMerge.Merge{TDocument}"/>.</summary>
+/// <summary>Semantic merge rules for members that are sets or counters, named by JSON Pointer (for example <c>/Tags</c>).</summary>
+/// <remarks>
+/// A set member is a JSON array whose items are compared by value: items added on either side are kept, items removed on
+/// either side are removed, and duplicates collapse. A counter member is a number: the result is
+/// <c>server + (local - base)</c>, so concurrent increments add up. Use the member names as they appear in JSON (after
+/// any naming policy).
+/// </remarks>
+public sealed record ThreeWayMergeOptions
+{
+    /// <summary>No semantic members: every array and number is an atomic value.</summary>
+    public static ThreeWayMergeOptions Default { get; } = new();
+
+    /// <summary>JSON Pointers of members merged as sets.</summary>
+    public IReadOnlySet<string> Sets { get; init; } = new HashSet<string>(StringComparer.Ordinal);
+
+    /// <summary>JSON Pointers of members merged as counters.</summary>
+    public IReadOnlySet<string> Counters { get; init; } = new HashSet<string>(StringComparer.Ordinal);
+}
+
+/// <summary>The result of <see cref="ThreeWayMerge.Merge{TDocument}(TDocument, TDocument, TDocument, JsonTypeInfo{TDocument})"/>.</summary>
 /// <typeparam name="TDocument">The synchronized entity type.</typeparam>
 /// <param name="Merged">The merged document. Conflicting members hold the server value.</param>
 /// <param name="Conflicts">JSON Pointers of members changed differently on both sides, and <see cref="ThreeWayMerge.DeletionConflict"/> for delete versus update.</param>
@@ -157,7 +225,8 @@ public sealed record ThreeWayMergeResult<TDocument>(TDocument Merged, IReadOnlyL
 /// <typeparam name="TDocument">The synchronized entity type.</typeparam>
 /// <param name="typeInfo">Source-generated JSON metadata for the document type.</param>
 /// <param name="fallback">The handler for conflicts the merge cannot settle.</param>
-public sealed class ThreeWayMergeConflictHandler<TDocument>(JsonTypeInfo<TDocument> typeInfo, IConflictHandler<TDocument>? fallback = null) : IConflictHandler<TDocument>
+/// <param name="options">Members merged as sets or counters.</param>
+public sealed class ThreeWayMergeConflictHandler<TDocument>(JsonTypeInfo<TDocument> typeInfo, IConflictHandler<TDocument>? fallback = null, ThreeWayMergeOptions? options = null) : IConflictHandler<TDocument>
     where TDocument : class, ISyncEntity
 {
     private readonly JsonTypeInfo<TDocument> _typeInfo = typeInfo ?? throw new ArgumentNullException(nameof(typeInfo));
@@ -172,7 +241,7 @@ public sealed class ThreeWayMergeConflictHandler<TDocument>(JsonTypeInfo<TDocume
             return _fallback.Resolve(context);
         }
 
-        var result = ThreeWayMerge.Merge(context.AssumedMaster, context.Fork, context.RealMaster, _typeInfo);
+        var result = ThreeWayMerge.Merge(context.AssumedMaster, context.Fork, context.RealMaster, _typeInfo, options ?? ThreeWayMergeOptions.Default);
         if (!result.IsClean)
         {
             return _fallback.Resolve(context);

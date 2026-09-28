@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+    <PropertyGroup>
+        <!-- Windows only on this machine: the Android/iOS/Mac Catalyst workloads are not installed. Add their target
+             frameworks (and Platforms folders) to build for them; nothing in the sample is Windows-specific except the
+             smoke automation. -->
+        <TargetFrameworks>net10.0-windows10.0.19041.0</TargetFrameworks>
+        <OutputType>Exe</OutputType>
+        <RootNamespace>BlazorSync.Samples.Hybrid.Maui</RootNamespace>
+        <UseMaui>true</UseMaui>
+        <SingleProject>true</SingleProject>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <EnableDefaultCssItems>false</EnableDefaultCssItems>
+        <Nullable>enable</Nullable>
+        <IsPackable>false</IsPackable>
+        <Description>Sample: a .NET MAUI Blazor Hybrid app with a durable SQLite replica synced over HTTP, running the same NotesPanel as the web samples.</Description>
+        <ApplicationTitle>BlazorSync notes (MAUI)</ApplicationTitle>
+        <ApplicationId>com.blazorsync.samples.notes</ApplicationId>
+        <ApplicationDisplayVersion>1.0</ApplicationDisplayVersion>
+        <ApplicationVersion>1</ApplicationVersion>
+        <WindowsPackageType>None</WindowsPackageType>
+        <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
+        <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <MauiIcon Include="Resources\AppIcon\appicon.svg" ForegroundFile="Resources\AppIcon\appiconfg.svg" Color="#512BD4" />
+        <MauiSplashScreen Include="Resources\Splash\splash.svg" Color="#512BD4" BaseSize="128,128" />
+        <MauiImage Include="Resources\Images\*" />
+        <MauiFont Include="Resources\Fonts\*" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Microsoft.Maui.Controls" Version="$(MauiVersion)" />
+        <PackageReference Include="Microsoft.AspNetCore.Components.WebView.Maui" Version="$(MauiVersion)" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\BlazorSync.Samples.Shared\BlazorSync.Samples.Shared.csproj" />
+        <ProjectReference Include="..\BlazorSync.Storage.Sqlite\BlazorSync.Storage.Sqlite.csproj" />
+        <ProjectReference Include="..\BlazorSync.Transport.Http\BlazorSync.Transport.Http.csproj" />
+    </ItemGroup>
+
+</Project>

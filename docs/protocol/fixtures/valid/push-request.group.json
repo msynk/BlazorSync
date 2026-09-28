@@ -1,0 +1,36 @@
+{
+  "operations": [
+    {
+      "operationId": "0192f0a1b2c37d4e8f9a0b1c2d3e4f60",
+      "documentId": "order-7",
+      "baseVersion": "41",
+      "document": {
+        "id": "order-7",
+        "updatedAt": "001790000000100:000000:device-a",
+        "deleted": false,
+        "title": "Order 7",
+        "amount": 30,
+        "due": null,
+        "tags": []
+      },
+      "group": "0192f0a1b2c37d4e8f9a0b1c2d3e4f5f",
+      "groupSize": 2
+    },
+    {
+      "operationId": "0192f0a1b2c37d4e8f9a0b1c2d3e4f61",
+      "documentId": "order-7-line-1",
+      "baseVersion": null,
+      "document": {
+        "id": "order-7-line-1",
+        "updatedAt": "001790000000100:000001:device-a",
+        "deleted": false,
+        "title": "3 items",
+        "amount": 30,
+        "due": null,
+        "tags": []
+      },
+      "group": "0192f0a1b2c37d4e8f9a0b1c2d3e4f5f",
+      "groupSize": 2
+    }
+  ]
+}

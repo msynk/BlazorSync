@@ -15,6 +15,7 @@
   <ItemGroup>
     <ProjectReference Include="..\BlazorSync.Samples.Notes.Client\BlazorSync.Samples.Notes.Client.csproj" />
     <ProjectReference Include="..\BlazorSync.Server.AspNetCore\BlazorSync.Server.AspNetCore.csproj" />
+    <ProjectReference Include="..\BlazorSync.Server.PostgreSql\BlazorSync.Server.PostgreSql.csproj" />
   </ItemGroup>
 
 </Project>

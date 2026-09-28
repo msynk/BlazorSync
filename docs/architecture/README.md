@@ -10,11 +10,11 @@
 | [002](adr-002-consistency-model.md) | Consistency model and scope | Accepted |
 | [003](adr-003-metadata-separation.md) | Local revision, operation id, server version, checkpoint, origin HLC | Accepted |
 | [004](adr-004-store-operations.md) | Atomic store operations, ownership and queue coalescing | Accepted (contract) |
-| [005](adr-005-feed-ordering.md) | Committed-prefix feed ordering and epochs | Accepted (reference); database algorithm proposed |
+| [005](adr-005-feed-ordering.md) | Committed-prefix feed ordering and epochs | Accepted; reference and PostgreSQL implemented |
 | [006](adr-006-conflict-model.md) | Conflict model, policies and defaults | Accepted (Phase 1, Phase 8: default `Defer`, three-way merge) |
-| [007](adr-007-hosting-and-lifecycle.md) | Hosting profiles, application API, DI and lifecycle | Proposed |
-| [008](adr-008-browser-storage.md) | IndexedDB baseline, OPFS/SQLite only on evidence | Proposed |
-| [009](adr-009-server-integration.md) | Controlled write service, PostgreSQL first, capture coverage | Proposed |
+| [007](adr-007-hosting-and-lifecycle.md) | Hosting profiles, application API, DI and lifecycle | Accepted; every profile has a tested sample |
+| [008](adr-008-browser-storage.md) | IndexedDB baseline, OPFS/SQLite only on evidence | Accepted; IndexedDB implemented |
+| [009](adr-009-server-integration.md) | Controlled write service, PostgreSQL first, capture coverage | Accepted; PostgreSQL authority implemented |
 | [010](adr-010-auth-and-scope.md) | Authentication, scope identity, revocation and account switching | Accepted; implemented for the reference authority |
 | [011](adr-011-compatibility.md) | Wire, store and domain schema compatibility | Accepted in principle |
 | [012](adr-012-packaging-and-support.md) | Packaging, support tiers, target framework, workloads | Accepted |

@@ -39,6 +39,7 @@ sealed class BlazorSync.Testing.ConformanceJsonContext : System.Text.Json.Serial
   System.Text.Json.Serialization.Metadata.JsonTypeInfo<System.Collections.Generic.IReadOnlyList<BlazorSync.Protocol.PushOperation<BlazorSync.Testing.ConformanceDocument>>> IReadOnlyListPushOperationConformanceDocument { get; }
   System.Text.Json.Serialization.Metadata.JsonTypeInfo<System.Collections.Generic.IReadOnlyList<BlazorSync.Protocol.PushOutcome<BlazorSync.Testing.ConformanceDocument>>> IReadOnlyListPushOutcomeConformanceDocument { get; }
   System.Text.Json.Serialization.Metadata.JsonTypeInfo<System.Collections.Generic.IReadOnlyList<BlazorSync.Protocol.RemoteChange<BlazorSync.Testing.ConformanceDocument>>> IReadOnlyListRemoteChangeConformanceDocument { get; }
+  System.Text.Json.Serialization.Metadata.JsonTypeInfo<System.Collections.Generic.IReadOnlyList<System.String>> IReadOnlyListString { get; }
   System.Text.Json.Serialization.Metadata.JsonTypeInfo<System.Int32> Int32 { get; }
   System.Text.Json.Serialization.Metadata.JsonTypeInfo<System.Int64> Int64 { get; }
   System.Text.Json.Serialization.Metadata.JsonTypeInfo<System.Int64?> NullableInt64 { get; }

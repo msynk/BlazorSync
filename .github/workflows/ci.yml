@@ -28,7 +28,10 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 10.0.x
+      # The solution includes a Windows-only WPF sample; the test projects build everywhere.
       - run: dotnet build src/BlazorSync.slnx -c Release
+        if: runner.os == 'Windows'
+      - run: dotnet build src/BlazorSync.Tests -c Release
       - run: dotnet test src/BlazorSync.Tests -c Release --no-build --logger "trx;LogFileName=unit.trx"
       - uses: actions/upload-artifact@v4
         if: always()
@@ -36,8 +39,33 @@ jobs:
           name: unit-results-${{ matrix.os }}
           path: src/BlazorSync.Tests/TestResults
 
+  postgres:
+    name: PostgreSQL authority tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      BLAZORSYNC_POSTGRES: Host=localhost;Port=5432;Username=postgres;Password=postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - run: dotnet test src/BlazorSync.Tests.PostgreSql -c Release --logger "trx;LogFileName=postgres.trx"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: postgres-results
+          path: src/BlazorSync.Tests.PostgreSql/TestResults
+
   browser:
-    name: Browser tests (Chromium, Firefox, WebKit)
+    name: Browser and WPF tests (Chromium, Firefox, WebKit)
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -67,7 +95,7 @@ jobs:
         with:
           dotnet-version: 10.0.x
       - run: >-
-          for p in BlazorSync BlazorSync.Blazor BlazorSync.Server.AspNetCore BlazorSync.Storage.IndexedDb
+          for p in BlazorSync BlazorSync.Blazor BlazorSync.Server.AspNetCore BlazorSync.Server.PostgreSql BlazorSync.Storage.IndexedDb
           BlazorSync.Storage.Sqlite BlazorSync.Testing BlazorSync.Transport.Http;
           do dotnet pack src/$p -c Release -o artifacts/packages || exit 1; done
       - uses: actions/upload-artifact@v4

@@ -22,7 +22,21 @@ public sealed record PushOperation<TDocument>(
     [property: JsonPropertyName("documentId"), JsonRequired] string DocumentId,
     [property: JsonPropertyName("baseVersion"), JsonRequired, JsonIgnore(Condition = JsonIgnoreCondition.Never), JsonConverter(typeof(WireNullableInt64JsonConverter))] long? BaseVersion,
     [property: JsonPropertyName("document"), JsonRequired] TDocument Document)
-    where TDocument : class, ISyncEntity;
+    where TDocument : class, ISyncEntity
+{
+    /// <summary>
+    /// A dependency group id (protocol §4.1). All operations of a group are in the same request and are applied together
+    /// or not at all. Send only to servers that advertise <see cref="SyncFeatures.Groups"/>.
+    /// </summary>
+    [JsonPropertyName("group")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Group { get; init; }
+
+    /// <summary>How many operations of <see cref="Group"/> the request carries (the server verifies it).</summary>
+    [JsonPropertyName("groupSize")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int GroupSize { get; init; }
+}
 
 /// <summary>
 /// A request carrying a batch of independent operations. The batch is <em>not</em> atomic: each
@@ -149,4 +163,26 @@ public static class PushErrorCodes
     /// exists (it may have been deleted and purged). Writing it again as a new document is an explicit choice.
     /// </summary>
     public const string BaseExpired = "base-expired";
+
+    /// <summary>
+    /// With <see cref="PushOutcomeKind.RetryLater"/>: nothing was applied because another operation of the same
+    /// dependency group was not accepted. Resend the group once that operation is settled.
+    /// </summary>
+    public const string GroupAborted = "group-aborted";
+
+    /// <summary>
+    /// Replica-side rejection: another change of the dependency group was rejected or kept as a conflict, so this change
+    /// is parked until that one is resolved or retried.
+    /// </summary>
+    public const string GroupFailed = "group-failed";
+
+    /// <summary>Replica-side rejection: the server does not support dependency groups, so the group cannot be sent atomically.</summary>
+    public const string GroupsUnsupported = "groups-unsupported";
+}
+
+/// <summary>Optional protocol features a server advertises in <see cref="PullResult{TDocument}.Features"/>.</summary>
+public static class SyncFeatures
+{
+    /// <summary>The server applies dependency groups atomically (protocol §4.1).</summary>
+    public const string Groups = "groups";
 }

@@ -54,9 +54,13 @@ unsynchronized work silently.
   - `VACUUM INTO` stops at the first damaged page.
   - `.recover` is a CLI/extension feature that is not available through `Microsoft.Data.Sqlite`.
   - Clean data is cheaper and safer to pull again from the server than to trust from a damaged file.
-- **Upcasting documents on read.** Not done yet. Stored JSON is read with the application's current contract,
-  so domain schema changes must be JSON-compatible (additive members, `[JsonPropertyName]` for renames) or
-  migrated by the application.
+- **An upcasting hook in the stores and transports.** Not done. Every reader already deserializes with the
+  document type's contract, so the upgrade lives in the type: `[JsonExtensionData]` plus `IJsonOnDeserialized`,
+  with `DocumentUpgrade.TryTake` to move old members (tested through SQLite and the wire in
+  `DocumentUpgradeTests`).
+  - Limitation: an upload that is in flight across a shape change is fingerprinted by the server with the old
+    shape. Its resend with the upgraded payload is answered `operation-id-reused`. Let queues drain before
+    changing a document's shape, or keep both shapes readable during the roll-out window.
 
 ## Consequences
 

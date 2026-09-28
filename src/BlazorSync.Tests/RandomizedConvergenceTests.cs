@@ -115,6 +115,15 @@ public sealed class RandomizedConvergenceTests(ITestOutputHelper output)
                     case 8 when policy == "defer":
                         Record(await SettleOneAsync(replica, random, seed, step));
                         break;
+                    case 9 when step % 2 == 0:
+                        // A dependency group of two documents.
+                        var second = ids[(Array.IndexOf(ids, id) + 1 + random.Next(ids.Length - 1)) % ids.Length];
+                        foreach (var receipt in await replica.Engine.WriteGroupAsync([new Note { Id = id, Title = $"s{seed}-{step}-g" }, new Note { Id = second, Title = $"s{seed}-{step}-g" }]))
+                        {
+                            Record(receipt);
+                        }
+
+                        break;
                     case 7:
                         // Crash before the acknowledgement of the next push commits.
                         var target = replica.Store.UpdateCalls + 2;
@@ -146,6 +155,16 @@ public sealed class RandomizedConvergenceTests(ITestOutputHelper output)
             foreach (var replica in replicas)
             {
                 results.Add(await replica.Engine.SyncAsync());
+            }
+
+            // Changes parked because another change of their group was kept as a conflict are released when it is resolved;
+            // a group whose conflict was discarded or settled with the server state is retried explicitly.
+            foreach (var replica in replicas)
+            {
+                foreach (var parked in await replica.Engine.GetRejectedAsync(100))
+                {
+                    Record(await replica.Engine.RetryRejectedAsync(parked.Current.Id));
+                }
             }
 
             // The user decides every kept conflict (default policy only).
@@ -211,10 +230,14 @@ public sealed class RandomizedConvergenceTests(ITestOutputHelper output)
             }
         }
 
-        var sent = replicas.SelectMany(r => r.Transport.PushLog).SelectMany(p => p.Operations).Select(o => o.OperationId).Distinct().Count();
+        var operations = replicas.SelectMany(r => r.Transport.PushLog).SelectMany(p => p.Operations).ToList();
+        var sent = operations.Select(o => o.OperationId).Distinct().Count();
         if (restoreCount == 0)
         {
-            Assert.Equal(sent, server.Server.ReceiptCount);
+            // Every ungrouped operation is decided exactly once. A grouped one may be aborted with its group and replaced
+            // by a new operation later, so it is decided at most once.
+            var ungrouped = operations.Where(o => o.Group is null).Select(o => o.OperationId).Distinct().Count();
+            Assert.InRange(server.Server.ReceiptCount, ungrouped, sent);
         }
 
         output.WriteLine($"seed {seed} {policy} restores={restoreCount} settled at quiescence={settledTotal}: {server.Server.Snapshot().Count} documents, {sent} operations");

@@ -12,6 +12,7 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
     <PackageReference Include="Microsoft.Playwright" Version="1.63.0" />
+    <PackageReference Include="Npgsql" Version="10.0.3" />
     <PackageReference Include="xunit" Version="2.9.2" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
   </ItemGroup>
@@ -23,6 +24,9 @@
     <ProjectReference Include="..\BlazorSync.Tests.BrowserHost\BlazorSync.Tests.BrowserHost.csproj" ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true" />
     <ProjectReference Include="..\BlazorSync.Samples.Notes.Server\BlazorSync.Samples.Notes.Server.csproj" ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true" />
     <ProjectReference Include="..\BlazorSync.Samples.WebApp\BlazorSync.Samples.WebApp.csproj" ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true" />
+    <ProjectReference Include="..\BlazorSync.Samples.Hybrid.Wpf\BlazorSync.Samples.Hybrid.Wpf.csproj" ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true" Condition="'$(OS)' == 'Windows_NT'" />
+    <!-- Built only where the maui-windows workload is installed: dotnet test -p:BuildMauiSample=true -->
+    <ProjectReference Include="..\BlazorSync.Samples.Hybrid.Maui\BlazorSync.Samples.Hybrid.Maui.csproj" ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true" Condition="'$(OS)' == 'Windows_NT' And '$(BuildMauiSample)' == 'true'" />
   </ItemGroup>
 
   <!-- dotnet test -p:BrowserHostAot=true runs the same tests against a WebAssembly AOT build (slow to compile). -->

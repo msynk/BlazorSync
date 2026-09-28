@@ -16,6 +16,7 @@ public sealed class PublicApiTests
         "BlazorSync",
         "BlazorSync.Blazor",
         "BlazorSync.Server.AspNetCore",
+        "BlazorSync.Server.PostgreSql",
         "BlazorSync.Storage.IndexedDb",
         "BlazorSync.Storage.Sqlite",
         "BlazorSync.Testing",

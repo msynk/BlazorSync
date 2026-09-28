@@ -115,7 +115,7 @@ public sealed class ConflictResolutionTests : IDisposable
         Assert.Equal("theirs+mine", server.Get("n1").Title);
     }
 
-    [Fact(DisplayName = "I17: a SQLite schema 1 database with a pending write upgrades to schema 2 without losing it")]
+    [Fact(DisplayName = "I17: a SQLite schema 1 database with a pending write upgrades to the current schema without losing it")]
     public async Task SqliteMigrationKeepsPendingWork()
     {
         await using (var connection = new SqliteConnection($"Data Source={_database.Path}"))
@@ -161,6 +161,6 @@ public sealed class ConflictResolutionTests : IDisposable
         await check.OpenAsync();
         await using var version = check.CreateCommand();
         version.CommandText = "PRAGMA user_version";
-        Assert.Equal(2L, await version.ExecuteScalarAsync());
+        Assert.Equal((long)BlazorSync.Storage.Sqlite.SqliteLocalStore<Note>.SchemaVersion, await version.ExecuteScalarAsync());
     }
 }

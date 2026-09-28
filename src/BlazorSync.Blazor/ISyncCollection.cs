@@ -19,9 +19,10 @@ public interface ISyncCollection<TDocument>
     Task<TDocument?> GetAsync(string id, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Returns documents matching <paramref name="query"/>. The filter and order run in memory over the
-    /// collection (they are not translated to a database query), and the result is bounded by
-    /// <see cref="SyncQuery{TDocument}.Limit"/>.
+    /// Returns documents matching <paramref name="query"/>, bounded by <see cref="SyncQuery{TDocument}.Limit"/>. The
+    /// filter and order run in memory (they are not translated to a database query). With the default order (by id), local
+    /// replicas read the store in index order page by page and stop at the limit; a custom order reads the whole
+    /// collection.
     /// </summary>
     Task<IReadOnlyList<TDocument>> QueryAsync(SyncQuery<TDocument>? query = null, CancellationToken cancellationToken = default);
 
@@ -30,6 +31,13 @@ public interface ISyncCollection<TDocument>
 
     /// <summary>Creates or updates a document. The result says how far the write is confirmed.</summary>
     Task<SyncWriteResult> SaveAsync(TDocument document, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Saves several documents as one dependency group: the server applies them all or none (for example an order and its
+    /// lines). Local replicas commit the group at once and upload it in one request; server-connected hosts write it in one
+    /// request. Set <see cref="ISyncEntity.Deleted"/> on a document to delete it as part of the group.
+    /// </summary>
+    Task<IReadOnlyList<SyncWriteResult>> SaveAllAsync(IReadOnlyList<TDocument> documents, CancellationToken cancellationToken = default);
 
     /// <summary>Deletes a document (a tombstone that replicates).</summary>
     Task<SyncWriteResult> DeleteAsync(string id, CancellationToken cancellationToken = default);
@@ -203,12 +211,20 @@ public sealed record SyncWriteResult(string Id, SyncConfirmation Confirmation, s
 /// <summary>Shared query evaluation.</summary>
 internal static class Queries
 {
+    public const int PageSize = 200;
+
+    public static void Validate<TDocument>(SyncQuery<TDocument> query)
+        where TDocument : class, ISyncEntity
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(query.Limit, 1, nameof(query.Limit));
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(query.Limit, SyncQuery<TDocument>.MaxLimit, nameof(query.Limit));
+    }
+
     public static IReadOnlyList<TDocument> Apply<TDocument>(IEnumerable<TDocument> documents, SyncQuery<TDocument>? query)
         where TDocument : class, ISyncEntity
     {
         query ??= new SyncQuery<TDocument>();
-        ArgumentOutOfRangeException.ThrowIfLessThan(query.Limit, 1, nameof(query.Limit));
-        ArgumentOutOfRangeException.ThrowIfGreaterThan(query.Limit, SyncQuery<TDocument>.MaxLimit, nameof(query.Limit));
+        Validate(query);
 
         var matching = documents.Where(d => !d.Deleted && (query.Where?.Invoke(d) ?? true)).ToList();
         matching.Sort(query.Order ?? ((a, b) => string.CompareOrdinal(a.Id, b.Id)));

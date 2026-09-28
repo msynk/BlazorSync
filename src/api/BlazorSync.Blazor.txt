@@ -13,6 +13,7 @@ interface BlazorSync.Blazor.ISyncCollection<TDocument> where TDocument : class, 
   abstract System.Threading.Tasks.Task<System.Boolean> DiscardConflictAsync(System.String id, System.Threading.CancellationToken cancellationToken = default)
   abstract System.Threading.Tasks.Task<System.Boolean> RevertAsync(System.String id, System.Threading.CancellationToken cancellationToken = default)
   abstract System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<BlazorSync.Blazor.SyncDocumentConflict<TDocument>>> GetConflictsAsync(System.Int32 limit = 100, System.Threading.CancellationToken cancellationToken = default)
+  abstract System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<BlazorSync.Blazor.SyncWriteResult>> SaveAllAsync(System.Collections.Generic.IReadOnlyList<TDocument> documents, System.Threading.CancellationToken cancellationToken = default)
   abstract System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TDocument>> QueryAsync(BlazorSync.Blazor.SyncQuery<TDocument> query = null, System.Threading.CancellationToken cancellationToken = default)
   abstract System.Threading.Tasks.Task<TDocument> GetAsync(System.String id, System.Threading.CancellationToken cancellationToken = default)
 record BlazorSync.Blazor.LocalReplica<TDocument> where TDocument : class, BlazorSync.ISyncEntity
@@ -36,6 +37,7 @@ sealed class BlazorSync.Blazor.LocalSyncCollection<TDocument> : BlazorSync.Blazo
   System.Threading.Tasks.Task<System.Boolean> DiscardConflictAsync(System.String id, System.Threading.CancellationToken cancellationToken = default)
   System.Threading.Tasks.Task<System.Boolean> RevertAsync(System.String id, System.Threading.CancellationToken cancellationToken = default)
   System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<BlazorSync.Blazor.SyncDocumentConflict<TDocument>>> GetConflictsAsync(System.Int32 limit = 100, System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<BlazorSync.Blazor.SyncWriteResult>> SaveAllAsync(System.Collections.Generic.IReadOnlyList<TDocument> documents, System.Threading.CancellationToken cancellationToken = default)
   System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TDocument>> QueryAsync(BlazorSync.Blazor.SyncQuery<TDocument> query = null, System.Threading.CancellationToken cancellationToken = default)
   System.Threading.Tasks.Task<TDocument> GetAsync(System.String id, System.Threading.CancellationToken cancellationToken = default)
   ctor(BlazorSync.Blazor.SyncSession<TDocument> session, System.Func<System.Threading.CancellationToken, System.Threading.Tasks.Task<System.String>> resolveAccount)
@@ -55,6 +57,7 @@ sealed class BlazorSync.Blazor.ServerSyncCollection<TDocument> : BlazorSync.Blaz
   System.Threading.Tasks.Task<System.Boolean> DiscardConflictAsync(System.String id, System.Threading.CancellationToken cancellationToken = default)
   System.Threading.Tasks.Task<System.Boolean> RevertAsync(System.String id, System.Threading.CancellationToken cancellationToken = default)
   System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<BlazorSync.Blazor.SyncDocumentConflict<TDocument>>> GetConflictsAsync(System.Int32 limit = 100, System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<BlazorSync.Blazor.SyncWriteResult>> SaveAllAsync(System.Collections.Generic.IReadOnlyList<TDocument> documents, System.Threading.CancellationToken cancellationToken = default)
   System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TDocument>> QueryAsync(BlazorSync.Blazor.SyncQuery<TDocument> query = null, System.Threading.CancellationToken cancellationToken = default)
   System.Threading.Tasks.Task<TDocument> GetAsync(System.String id, System.Threading.CancellationToken cancellationToken = default)
   System.Void Dispose()

@@ -135,6 +135,37 @@ public sealed class ServerSyncCollection<TDocument> : ISyncCollection<TDocument>
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Each document is based on the version this instance last read, as with <see cref="SaveAsync"/>. If any of them
+    /// conflicts or is refused, none is written: that document reports its own result and the others report
+    /// <see cref="SyncConfirmation.Conflict"/> with a message naming the group.
+    /// </remarks>
+    public async Task<IReadOnlyList<SyncWriteResult>> SaveAllAsync(IReadOnlyList<TDocument> documents, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(documents);
+        if (documents.Count == 0 || documents.Select(static d => d.Id).Distinct(StringComparer.Ordinal).Count() != documents.Count)
+        {
+            throw new ArgumentException("The group must contain at least one document and each id once.", nameof(documents));
+        }
+
+        var group = Guid.CreateVersion7().ToString("N");
+        var operations = documents.Select(document =>
+        {
+            SyncIds.Validate(document.Id, nameof(documents));
+            var copy = _clone(document);
+            copy.UpdatedAt = _clock.Now();
+            return new PushOperation<TDocument>(Guid.CreateVersion7().ToString("N"), copy.Id, _versions.TryGetValue(copy.Id, out var version) ? version : null, copy)
+            {
+                Group = group,
+                GroupSize = documents.Count,
+            };
+        }).ToList();
+        var context = await ContextAsync(cancellationToken).ConfigureAwait(false);
+        var outcomes = (await _authority.PushAsync(context, new PushRequest<TDocument>(operations), cancellationToken).ConfigureAwait(false)).Outcomes;
+        return [.. operations.Zip(outcomes).Select(pair => Result(pair.First.DocumentId, pair.Second))];
+    }
+
+    /// <inheritdoc />
     public async Task<SyncWriteResult> DeleteAsync(string id, CancellationToken cancellationToken = default)
     {
         var context = await ContextAsync(cancellationToken).ConfigureAwait(false);
@@ -223,16 +254,23 @@ public sealed class ServerSyncCollection<TDocument> : ISyncCollection<TDocument>
         var context = await ContextAsync(cancellationToken).ConfigureAwait(false);
         var operation = new PushOperation<TDocument>(Guid.CreateVersion7().ToString("N"), document.Id, baseVersion, document);
         var outcome = (await _authority.PushAsync(context, new PushRequest<TDocument>([operation]), cancellationToken).ConfigureAwait(false)).Outcomes[0];
+        return Result(document.Id, outcome);
+    }
+
+    private SyncWriteResult Result(string id, PushOutcome<TDocument> outcome)
+    {
         switch (outcome.Kind)
         {
             case PushOutcomeKind.Accepted:
-                _versions[document.Id] = outcome.Version!.Value;
-                return new SyncWriteResult(document.Id, SyncConfirmation.AcceptedByServer);
+                _versions[id] = outcome.Version!.Value;
+                return new SyncWriteResult(id, SyncConfirmation.AcceptedByServer);
             case PushOutcomeKind.Conflict:
-                _versions.TryRemove(document.Id, out _);
-                return new SyncWriteResult(document.Id, SyncConfirmation.Conflict, "The document was changed by someone else. Reload it and try again.");
+                _versions.TryRemove(id, out _);
+                return new SyncWriteResult(id, SyncConfirmation.Conflict, "The document was changed by someone else. Reload it and try again.");
+            case PushOutcomeKind.RetryLater when outcome.ErrorCode == PushErrorCodes.GroupAborted:
+                return new SyncWriteResult(id, SyncConfirmation.Conflict, "Not saved: another document of the same group could not be saved.");
             default:
-                return new SyncWriteResult(document.Id, SyncConfirmation.Rejected, outcome.ErrorCode);
+                return new SyncWriteResult(id, SyncConfirmation.Rejected, outcome.ErrorCode);
         }
     }
 

@@ -1,6 +1,6 @@
 # ADR-009: Server integration and change capture
 
-- **Status:** Proposed; implementation in Phase 4 (2026-09-27)
+- **Status:** Accepted; PostgreSQL authority implemented with Npgsql (`BlazorSync.Server.PostgreSql`, 2026-09-28)
 - **Invariants:** I04, I05, I06, I18
 
 ## Context
@@ -29,6 +29,25 @@ ordinary API endpoints, background jobs, admin tools, raw SQL.
   tested capture mechanism (2 or 3) exists; documentation says so explicitly.
 - Correctness never relies on a process lock; concurrency is enforced by conditional `UPDATE … WHERE
   version = @base` and unique indexes on `(scope, operation_id)` and `(scope, document_id)`.
+
+## Implementation (2026-09-28)
+
+`PostgreSqlSyncAuthority<T>` is the controlled write service of alternative 1, on Npgsql rather than EF Core:
+- The protocol needs a handful of statements (feed lock, conditional write, receipt insert). EF Core adds a
+  dependency and change tracking without helping with the locking.
+- Applications that keep their domain model in EF Core call the authority (in-process or over HTTP) for
+  synchronized collections. Writes that bypass it stay unsupported, as decided above.
+
+Implementation details:
+- Documents are stored as their exact JSON text, per (collection, scope, id).
+- Receipts are keyed by (collection, scope, operation id).
+- Ordering follows ADR-005.
+- Commit hints use `LISTEN`/`NOTIFY`, so they cross server processes; the multi-process browser test runs two
+  notes-server processes on one database.
+- Retention and epochs: `PurgeTombstonesAsync`, `PurgeReceiptsAsync`, `BeginNewEpochAsync`.
+- The schema is versioned in `bs_meta`, created under an advisory lock, and a newer schema is refused.
+
+Not done: SQL Server; trigger- or CDC-based capture; a throughput benchmark on PostgreSQL.
 
 ## Consequences
 

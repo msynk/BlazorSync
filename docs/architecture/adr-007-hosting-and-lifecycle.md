@@ -1,6 +1,8 @@
 # ADR-007: Hosting profiles, application API, DI lifetimes and lifecycle
 
-- **Status:** Accepted; implemented for browser, server-connected and request profiles (`BlazorSync.Blazor`, 2026-09-28). Native Hybrid hosts: recipe available (`AddLocalSyncCollection` + SQLite), no MAUI/WPF sample yet.
+- **Status:** Accepted; implemented for every profile. The browser, server-connected and request profiles are
+  covered by `BlazorSync.Blazor`. The native profile has WPF and .NET MAUI (Windows) Blazor Hybrid samples, each
+  with SQLite, HTTP, pause/resume on minimize/background, and an automated UI test (2026-09-28).
 - **Invariants:** I07, I13, I15, I16, I18
 
 ## Context

@@ -19,9 +19,10 @@ sealed class BlazorSync.Storage.Sqlite.SqliteLocalStore<TDocument> : BlazorSync.
   System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<BlazorSync.Storage.SyncRecord<TDocument>>> GetRejectedAsync(System.Int32 limit, System.Threading.CancellationToken cancellationToken = default)
   System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<BlazorSync.Storage.SyncRecord<TDocument>>> GetStaleAsync(System.Int64 generation, System.Int32 limit, System.Threading.CancellationToken cancellationToken = default)
   System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TDocument>> QueryAsync(System.Boolean includeDeleted = false, System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TDocument>> QueryPageAsync(System.String afterId, System.Int32 limit, System.Boolean includeDeleted = false, System.Threading.CancellationToken cancellationToken = default)
   System.Threading.Tasks.Task<System.Int32> CountDirtyAsync(System.Threading.CancellationToken cancellationToken = default)
   System.Threading.Tasks.Task<System.Int32> PurgeAsync(System.Collections.Generic.IReadOnlyList<System.String> ids, System.Int64 generation, System.Threading.CancellationToken cancellationToken = default)
-  const System.Int32 SchemaVersion = 2
+  const System.Int32 SchemaVersion = 3
   static System.Threading.Tasks.Task<BlazorSync.Storage.Sqlite.SqliteLocalStore<TDocument>> OpenAsync(BlazorSync.Storage.Sqlite.SqliteLocalStoreOptions options, System.Text.Json.Serialization.Metadata.JsonTypeInfo<TDocument> typeInfo, System.Threading.CancellationToken cancellationToken = default)
 record BlazorSync.Storage.Sqlite.SqliteRebuildReport
   System.Boolean Complete { get; }

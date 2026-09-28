@@ -1,0 +1,30 @@
+sealed class BlazorSync.Server.PostgreSql.PostgreSqlSchemaException : System.NotSupportedException, System.Runtime.Serialization.ISerializable
+  ctor(System.String message)
+sealed class BlazorSync.Server.PostgreSql.PostgreSqlSyncAuthorityOptions<TDocument> where TDocument : class, BlazorSync.ISyncEntity
+  BlazorSync.Clocks.IPhysicalClock PhysicalClock { get; init; }
+  Npgsql.NpgsqlDataSource DataSource { get; init; }
+  System.Func<BlazorSync.Protocol.PushOperation<TDocument>, TDocument, System.String> Validator { get; init; }
+  System.Func<BlazorSync.Server.SyncCallContext, BlazorSync.Protocol.PushOperation<TDocument>, TDocument, System.Boolean> CanWrite { get; init; }
+  System.Func<BlazorSync.Server.SyncCallContext, System.String> ScopeFingerprint { get; init; }
+  System.Func<BlazorSync.Server.SyncCallContext, TDocument, System.Boolean> CanRead { get; init; }
+  System.Int32 MaxOperationsPerPush { get; init; }
+  System.Int32 MaxPageSize { get; init; }
+  System.String Collection { get; init; }
+  System.Text.Json.Serialization.Metadata.JsonTypeInfo<TDocument> DocumentType { get; init; }
+  System.TimeSpan MaxClockSkew { get; init; }
+  ctor()
+sealed class BlazorSync.Server.PostgreSql.PostgreSqlSyncAuthority<TDocument> : BlazorSync.Server.ISyncAuthority<TDocument>, BlazorSync.Server.ISyncCommitNotifier, BlazorSync.Server.ISyncDocumentReader<TDocument>, System.IAsyncDisposable where TDocument : class, BlazorSync.ISyncEntity
+  BlazorSync.Server.AuthorityLimits Limits { get; }
+  System.String Epoch { get; }
+  System.Threading.Tasks.Task BeginNewEpochAsync(System.Int64 versionFloor, System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<BlazorSync.Protocol.PullResult<TDocument>> PullAsync(BlazorSync.Server.SyncCallContext context, BlazorSync.Protocol.PullRequest request, System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<BlazorSync.Protocol.PushResult<TDocument>> PushAsync(BlazorSync.Server.SyncCallContext context, BlazorSync.Protocol.PushRequest<TDocument> request, System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<BlazorSync.Server.StoredDocument<TDocument>> GetAsync(BlazorSync.Server.SyncCallContext context, System.String id, System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<BlazorSync.Server.StoredDocument<TDocument>>> ListAsync(BlazorSync.Server.SyncCallContext context, System.Int32 limit, System.String afterId = null, System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<System.Int32> PurgeReceiptsAsync(System.String scope, System.Int64 throughVersion, System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<System.Int32> PurgeTombstonesAsync(System.String scope, System.Int64 throughVersion, System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<System.Int64> GetHighestVersionAsync(System.String scope, System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.ValueTask DisposeAsync()
+  const System.String Channel = "blazorsync_commits"
+  public event System.Action<BlazorSync.Server.AuthorityCommit> Committed
+  static System.Threading.Tasks.Task<BlazorSync.Server.PostgreSql.PostgreSqlSyncAuthority<TDocument>> CreateAsync(BlazorSync.Server.PostgreSql.PostgreSqlSyncAuthorityOptions<TDocument> options, System.Threading.CancellationToken cancellationToken = default)

@@ -8,6 +8,20 @@
   domain schema versioned independently (ADR-011); a documented client/server compatibility window.
 - Behavioural changes count as breaking even when signatures do not change.
 
+## Unreleased (PostgreSQL, dependency groups, hybrid hosts)
+
+| Change | Why | Migration |
+|---|---|---|
+| New package `BlazorSync.Server.PostgreSql` (`PostgreSqlSyncAuthority<T>`, `PostgreSqlSyncAuthorityOptions<T>`, `PostgreSqlSchemaException`; Npgsql 10.0.3). One instance serves every scope; the tables are created on first use. | Durable authority (Phase 4). | Additive. The notes sample server uses it when `BlazorSync:PostgreSql` is configured. |
+| **Protocol (additive):** optional `group`/`groupSize` on push operations, optional `features` on pull responses, outcome code `group-aborted` (with `retry-later`); replica-only codes `group-failed`, `groups-unsupported` (`PushErrorCodes`, `SyncFeatures`). | Dependency groups (protocol §4.1). | Older authorities never receive groups: replicas send them only to authorities that advertise `groups`. |
+| The in-memory authority's operation fingerprint now includes `group` and `groupSize`. | A replay must match the whole request. | Only in-memory state existed; a receipt stored by an earlier build would answer `operation-id-reused`. |
+| `SyncEngine.WriteGroupAsync`, `ISyncCollection.SaveAllAsync`; `SyncRecord.Group`, `SyncGroup`; `PendingOperation.Group`/`GroupSize`. | Dependency groups. | Custom `ISyncCollection` implementations add `SaveAllAsync`; custom stores persist the new fields. |
+| SQLite store schema 3 (four group columns), IndexedDB schema 3 (fields only; the version bump closes older tabs). | Persist groups. | Forward only, in place, keeps pending work. |
+| `ILocalStore.QueryPageAsync`; `SyncEngine.QueryPageAsync`. `LocalSyncCollection.QueryAsync` with the default order reads bounded pages instead of the whole collection. | Bounded queries. | Custom stores implement `QueryPageAsync` (conformance case added). |
+| `ThreeWayMergeOptions` (set and counter members), new `ThreeWayMerge.Merge` overload, `ThreeWayMergeConflictHandler` takes options. | Semantic merges. | Additive. |
+| `DocumentUpgrade.TryTake`. | Upgrading old document shapes on read (ADR-013). | Additive. |
+| Samples: `BlazorSync.Samples.Hybrid.Wpf` (in the solution) and `BlazorSync.Samples.Hybrid.Maui` (Windows target; outside the solution because it needs the `maui-windows` workload). | Native hosts (ADR-007). | Samples only. |
+
 ## Unreleased (Phase 10: operations and packaging)
 
 | Change | Why | Migration |

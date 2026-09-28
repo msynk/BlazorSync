@@ -50,6 +50,9 @@ public sealed class SplitStore<T>(ILocalStore<T> writer, ILocalStore<T> reader) 
     public Task<IReadOnlyList<SyncRecord<T>>> GetRejectedAsync(int limit, CancellationToken cancellationToken = default) =>
         reader.GetRejectedAsync(limit, cancellationToken);
 
+    public Task<IReadOnlyList<T>> QueryPageAsync(string? afterId, int limit, bool includeDeleted = false, CancellationToken cancellationToken = default) =>
+        reader.QueryPageAsync(afterId, limit, includeDeleted, cancellationToken);
+
     public Task<int> PurgeAsync(IReadOnlyList<string> ids, long generation, CancellationToken cancellationToken = default) =>
         writer.PurgeAsync(ids, generation, cancellationToken);
 

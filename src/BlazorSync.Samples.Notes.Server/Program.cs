@@ -7,14 +7,29 @@ using BlazorSync.Server.AspNetCore;
 var builder = WebApplication.CreateBuilder(args);
 var app = builder.Build();
 
-// The sample keeps server data in memory: it is lost when the server restarts. Replicas notice (new epoch),
-// reset, and push their pending notes again. A production server uses a database-backed authority and
-// authenticates callers (see docs/architecture/adr-009 and adr-010).
-var authority = new InMemorySyncServer<Note>(new InMemorySyncServerOptions<Note>
+// By default the sample keeps server data in memory: it is lost when the server restarts. Replicas notice (new
+// epoch), reset, and push their pending notes again. With a connection string in BlazorSync:PostgreSql (for example
+// the environment variable BlazorSync__PostgreSql), data lives in PostgreSQL and several server processes can share
+// it; commit hints reach clients of every process. A production server also authenticates callers (ADR-010).
+ISyncAuthority<Note> authority;
+if (builder.Configuration["BlazorSync:PostgreSql"] is { Length: > 0 } connectionString)
 {
-    Cloner = DocumentCloner.Json(NotesJson.Default.Note),
-    Fingerprint = DocumentCloner.JsonFingerprint(NotesJson.Default.Note),
-});
+    var dataSource = Npgsql.NpgsqlDataSource.Create(connectionString);
+    authority = await BlazorSync.Server.PostgreSql.PostgreSqlSyncAuthority<Note>.CreateAsync(new()
+    {
+        DataSource = dataSource,
+        DocumentType = NotesJson.Default.Note,
+        Collection = "notes",
+    });
+}
+else
+{
+    authority = new InMemorySyncServer<Note>(new InMemorySyncServerOptions<Note>
+    {
+        Cloner = DocumentCloner.Json(NotesJson.Default.Note),
+        Fingerprint = DocumentCloner.JsonFingerprint(NotesJson.Default.Note),
+    });
+}
 
 app.UseBlazorFrameworkFiles();
 app.UseStaticFiles();

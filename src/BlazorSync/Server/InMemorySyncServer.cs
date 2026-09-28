@@ -278,7 +278,7 @@ public sealed class InMemorySyncServer<TDocument> : ISyncAuthority<TDocument>, I
                 .ToList();
 
             var position = window.Count > 0 ? window[^1].Version : Math.Max(since, 0);
-            return new PullResult<TDocument>(page, FormatCheckpoint(context, position), hasMore);
+            return new PullResult<TDocument>(page, FormatCheckpoint(context, position), hasMore) { Features = [SyncFeatures.Groups] };
         }
     }
 
@@ -304,13 +304,26 @@ public sealed class InMemorySyncServer<TDocument> : ISyncAuthority<TDocument>, I
                 isTransient: false);
         }
 
-        var outcomes = new List<PushOutcome<TDocument>>(request.Operations.Count);
+        var outcomes = new PushOutcome<TDocument>[request.Operations.Count];
         var documentsInRequest = new HashSet<string>(StringComparer.Ordinal);
         lock (_gate)
         {
-            foreach (var operation in request.Operations)
+            var groups = new Dictionary<string, List<int>>(StringComparer.Ordinal);
+            for (var i = 0; i < request.Operations.Count; i++)
             {
-                outcomes.Add(Visible(context, Apply(context, operation, documentsInRequest)));
+                var operation = request.Operations[i];
+                if (operation?.Group is { } group)
+                {
+                    (groups.TryGetValue(group, out var members) ? members : groups[group] = []).Add(i);
+                    continue;
+                }
+
+                outcomes[i] = Visible(context, Apply(context, operation, documentsInRequest));
+            }
+
+            foreach (var (group, members) in groups)
+            {
+                ApplyGroup(context, group, members, request.Operations, outcomes, documentsInRequest);
             }
         }
 
@@ -395,39 +408,116 @@ public sealed class InMemorySyncServer<TDocument> : ISyncAuthority<TDocument>, I
 
     private PushOutcome<TDocument> Apply(SyncCallContext context, PushOperation<TDocument>? operation, HashSet<string> documentsInRequest)
     {
+        if (Validate(operation, documentsInRequest) is { } invalid)
+        {
+            return invalid;
+        }
+
+        if (Replay(operation!) is { } replayed)
+        {
+            return replayed;
+        }
+
+        var outcome = Evaluate(context, operation!) ?? Commit(operation!);
+        Remember(operation!, outcome);
+        return outcome;
+    }
+
+    /// <summary>
+    /// A dependency group (protocol §4.1): every member is decided, and the accepted ones are committed only if all of
+    /// them would be accepted. Otherwise the members that failed keep their outcome and the others get
+    /// <see cref="PushOutcomeKind.RetryLater"/> with <see cref="PushErrorCodes.GroupAborted"/> and no receipt.
+    /// </summary>
+    private void ApplyGroup(SyncCallContext context, string group, List<int> members, IReadOnlyList<PushOperation<TDocument>> operations, PushOutcome<TDocument>[] outcomes, HashSet<string> documentsInRequest)
+    {
+        var invalid = !SyncIds.IsValid(group) || members.Any(i => operations[i].GroupSize != members.Count);
+        foreach (var i in members)
+        {
+            if (Validate(operations[i], documentsInRequest) is { } rejected)
+            {
+                outcomes[i] = rejected;
+                invalid = true;
+            }
+        }
+
+        if (invalid)
+        {
+            foreach (var i in members)
+            {
+                outcomes[i] = outcomes[i] ?? PushOutcome<TDocument>.Rejected(operations[i].OperationId, PushErrorCodes.Invalid, "The dependency group is malformed or incomplete.");
+            }
+
+            return;
+        }
+
+        // Evaluate everything first; nothing changes until the whole group is known to succeed.
+        var decided = new PushOutcome<TDocument>?[members.Count];
+        var allAccept = true;
+        for (var m = 0; m < members.Count; m++)
+        {
+            var operation = operations[members[m]];
+            decided[m] = Replay(operation) ?? Evaluate(context, operation);
+            allAccept &= decided[m] is null or { Kind: PushOutcomeKind.Accepted };
+        }
+
+        for (var m = 0; m < members.Count; m++)
+        {
+            var operation = operations[members[m]];
+            PushOutcome<TDocument> outcome;
+            if (decided[m] is { } final)
+            {
+                outcome = final;
+                if (!final.IsDuplicate)
+                {
+                    Remember(operation, final);
+                }
+            }
+            else if (allAccept)
+            {
+                outcome = Commit(operation);
+                Remember(operation, outcome);
+            }
+            else
+            {
+                outcome = PushOutcome<TDocument>.RetryLater(operation.OperationId, PushErrorCodes.GroupAborted, "Another change of the same group was not accepted.");
+            }
+
+            outcomes[members[m]] = Visible(context, outcome);
+        }
+    }
+
+    private static PushOutcome<TDocument>? Validate(PushOperation<TDocument>? operation, HashSet<string> documentsInRequest)
+    {
         if (operation is null || !SyncIds.IsValid(operation.OperationId))
         {
             return PushOutcome<TDocument>.Rejected(operation?.OperationId ?? string.Empty, PushErrorCodes.Invalid, "Missing or invalid operation id.");
         }
 
-        var opId = operation.OperationId;
         if (!SyncIds.IsValid(operation.DocumentId)
             || operation.Document is null
             || !string.Equals(operation.Document.Id, operation.DocumentId, StringComparison.Ordinal)
             || operation.BaseVersion is < 1)
         {
-            return PushOutcome<TDocument>.Rejected(opId, PushErrorCodes.Invalid, "Malformed operation.");
+            return PushOutcome<TDocument>.Rejected(operation.OperationId, PushErrorCodes.Invalid, "Malformed operation.");
         }
 
-        if (!documentsInRequest.Add(operation.DocumentId))
-        {
-            return PushOutcome<TDocument>.Rejected(opId, PushErrorCodes.Invalid, "A push may contain one operation per document.");
-        }
-
-        var fingerprint = Fingerprint(operation);
-        if (_receipts.TryGetValue(opId, out var receipt))
-        {
-            return receipt.Fingerprint == fingerprint
-                ? receipt.Outcome with { IsDuplicate = true, Document = receipt.Outcome.Document is { } d ? _clone(d) : null }
-                : PushOutcome<TDocument>.Rejected(opId, PushErrorCodes.OperationIdReused, "The operation id was already used for a different request.");
-        }
-
-        var outcome = Decide(context, operation);
-        _receipts[opId] = new Receipt(fingerprint, outcome with { Document = outcome.Document is { } doc ? _clone(doc) : null });
-        return outcome;
+        return documentsInRequest.Add(operation.DocumentId)
+            ? null
+            : PushOutcome<TDocument>.Rejected(operation.OperationId, PushErrorCodes.Invalid, "A push may contain one operation per document.");
     }
 
-    private PushOutcome<TDocument> Decide(SyncCallContext context, PushOperation<TDocument> operation)
+    private PushOutcome<TDocument>? Replay(PushOperation<TDocument> operation) =>
+        _receipts.TryGetValue(operation.OperationId, out var receipt)
+            ? receipt.Fingerprint == Fingerprint(operation)
+                ? receipt.Outcome with { IsDuplicate = true, Document = receipt.Outcome.Document is { } d ? _clone(d) : null }
+                : PushOutcome<TDocument>.Rejected(operation.OperationId, PushErrorCodes.OperationIdReused, "The operation id was already used for a different request.")
+            : null;
+
+    private void Remember(PushOperation<TDocument> operation, PushOutcome<TDocument> outcome) =>
+        _receipts[operation.OperationId] = new Receipt(Fingerprint(operation), outcome with { Document = outcome.Document is { } doc ? _clone(doc) : null });
+
+    /// <summary>Decides an operation without changing anything: a final outcome, or <see langword="null"/> if it would be accepted.</summary>
+    private PushOutcome<TDocument>? Evaluate(SyncCallContext context, PushOperation<TDocument> operation)
     {
         var opId = operation.OperationId;
         var id = operation.DocumentId;
@@ -463,17 +553,22 @@ public sealed class InMemorySyncServer<TDocument> : ISyncAuthority<TDocument>, I
             return PushOutcome<TDocument>.Conflict(opId, current.Version, _clone(current.Document));
         }
 
+        return null;
+    }
+
+    private PushOutcome<TDocument> Commit(PushOperation<TDocument> operation)
+    {
         var version = ++_sequence;
         var stored = _clone(operation.Document);
-        _documents[id] = new Entry(stored, version);
-        return PushOutcome<TDocument>.Accepted(opId, version, _clone(stored));
+        _documents[operation.DocumentId] = new Entry(stored, version);
+        return PushOutcome<TDocument>.Accepted(operation.OperationId, version, _clone(stored));
     }
 
     private string Fingerprint(PushOperation<TDocument> operation)
     {
         var canonical = string.Create(
             CultureInfo.InvariantCulture,
-            $"{operation.DocumentId.Length}:{operation.DocumentId}|{operation.BaseVersion}|{_fingerprint(operation.Document)}");
+            $"{operation.DocumentId.Length}:{operation.DocumentId}|{operation.BaseVersion}|{operation.Group}|{operation.GroupSize}|{_fingerprint(operation.Document)}");
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
     }
 

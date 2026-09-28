@@ -10,9 +10,11 @@ public sealed class SampleServer : IAsyncDisposable
     private readonly string _publishDir;
     private readonly string _assembly;
     private Process? _process;
+    private readonly IReadOnlyDictionary<string, string>? _environment;
 
-    public SampleServer(string publishFolder, string assembly)
+    public SampleServer(string publishFolder, string assembly, IReadOnlyDictionary<string, string>? environment = null)
     {
+        _environment = environment;
         _publishDir = Path.Combine(AppContext.BaseDirectory, publishFolder);
         _assembly = assembly;
         using var probe = new TcpListener(IPAddress.Loopback, 0);
@@ -34,6 +36,11 @@ public sealed class SampleServer : IAsyncDisposable
             RedirectStandardError = true,
             UseShellExecute = false,
         };
+        foreach (var (name, value) in _environment ?? new Dictionary<string, string>())
+        {
+            start.Environment[name] = value;
+        }
+
         start.ArgumentList.Add(Path.Combine(_publishDir, _assembly));
         start.ArgumentList.Add("--urls");
         start.ArgumentList.Add(Address.ToString().TrimEnd('/'));

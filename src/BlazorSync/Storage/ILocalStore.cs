@@ -92,6 +92,13 @@ public interface ILocalStore<TDocument>
     /// </summary>
     Task<IReadOnlyList<TDocument>> QueryAsync(bool includeDeleted = false, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Returns up to <paramref name="limit"/> app-visible documents with an id ordinally greater than
+    /// <paramref name="afterId"/> (all when <see langword="null"/>), in ordinal id order, using an index, so a caller can
+    /// read a large collection in bounded pages. Same visibility rules as <see cref="QueryAsync"/>.
+    /// </summary>
+    Task<IReadOnlyList<TDocument>> QueryPageAsync(string? afterId, int limit, bool includeDeleted = false, CancellationToken cancellationToken = default);
+
     /// <summary>Gets the replica cursor (pull checkpoint and generation) for this collection.</summary>
     Task<ReplicaCursor> GetCursorAsync(CancellationToken cancellationToken = default);
 

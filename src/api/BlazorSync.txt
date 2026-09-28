@@ -88,9 +88,19 @@ sealed class BlazorSync.Conflicts.ServerWinsConflictHandler<TDocument> : BlazorS
 static class BlazorSync.Conflicts.ThreeWayMerge
   const System.String DeletionConflict = "(deleted)"
   static BlazorSync.Conflicts.ThreeWayMergeResult<TDocument> Merge<TDocument>(TDocument base, TDocument local, TDocument server, System.Text.Json.Serialization.Metadata.JsonTypeInfo<TDocument> typeInfo) where TDocument : class, BlazorSync.ISyncEntity
+  static BlazorSync.Conflicts.ThreeWayMergeResult<TDocument> Merge<TDocument>(TDocument base, TDocument local, TDocument server, System.Text.Json.Serialization.Metadata.JsonTypeInfo<TDocument> typeInfo, BlazorSync.Conflicts.ThreeWayMergeOptions options) where TDocument : class, BlazorSync.ISyncEntity
 sealed class BlazorSync.Conflicts.ThreeWayMergeConflictHandler<TDocument> : BlazorSync.Conflicts.IConflictHandler<TDocument> where TDocument : class, BlazorSync.ISyncEntity
   BlazorSync.Conflicts.ConflictResolution<TDocument> Resolve(BlazorSync.Conflicts.ConflictContext<TDocument> context)
-  ctor(System.Text.Json.Serialization.Metadata.JsonTypeInfo<TDocument> typeInfo, BlazorSync.Conflicts.IConflictHandler<TDocument> fallback = null)
+  ctor(System.Text.Json.Serialization.Metadata.JsonTypeInfo<TDocument> typeInfo, BlazorSync.Conflicts.IConflictHandler<TDocument> fallback = null, BlazorSync.Conflicts.ThreeWayMergeOptions options = null)
+record BlazorSync.Conflicts.ThreeWayMergeOptions
+  System.Boolean Equals(BlazorSync.Conflicts.ThreeWayMergeOptions other)
+  System.Collections.Generic.IReadOnlySet<System.String> Counters { get; init; }
+  System.Collections.Generic.IReadOnlySet<System.String> Sets { get; init; }
+  ctor()
+  static BlazorSync.Conflicts.ThreeWayMergeOptions Default { get; }
+  virtual System.Boolean Equals(System.Object obj)
+  virtual System.Int32 GetHashCode()
+  virtual System.String ToString()
 record BlazorSync.Conflicts.ThreeWayMergeResult<TDocument> where TDocument : class, BlazorSync.ISyncEntity
   System.Boolean Equals(BlazorSync.Conflicts.ThreeWayMergeResult<TDocument> other)
   System.Boolean IsClean { get; }
@@ -109,6 +119,8 @@ static class BlazorSync.Documents.DocumentCloner
   static System.Func<T, System.String> JsonFingerprint<T>(System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> typeInfo) where T : class
   static System.Func<T, T> Json<T>(System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> typeInfo) where T : class
   static T JsonClone<T>(T document) where T : class
+static class BlazorSync.Documents.DocumentUpgrade
+  static System.Boolean TryTake(System.Collections.Generic.Dictionary<System.String, System.Text.Json.JsonElement> unknown, System.String name, out System.Text.Json.JsonElement value)
 interface BlazorSync.ISyncEntity
   BlazorSync.Clocks.HlcTimestamp UpdatedAt { get; set; }
   System.Boolean Deleted { get; set; }
@@ -146,6 +158,7 @@ record BlazorSync.Protocol.PullResult<TDocument> where TDocument : class, Blazor
   System.Boolean Equals(BlazorSync.Protocol.PullResult<TDocument> other)
   System.Boolean HasMore { get; init; }
   System.Collections.Generic.IReadOnlyList<BlazorSync.Protocol.RemoteChange<TDocument>> Changes { get; init; }
+  System.Collections.Generic.IReadOnlyList<System.String> Features { get; init; }
   System.Void Deconstruct(out System.Collections.Generic.IReadOnlyList<BlazorSync.Protocol.RemoteChange<TDocument>> Changes, out BlazorSync.Checkpoint Checkpoint, out System.Boolean HasMore)
   ctor(System.Collections.Generic.IReadOnlyList<BlazorSync.Protocol.RemoteChange<TDocument>> Changes, BlazorSync.Checkpoint Checkpoint, System.Boolean HasMore)
   virtual System.Boolean Equals(System.Object obj)
@@ -155,13 +168,18 @@ static class BlazorSync.Protocol.PushErrorCodes
   const System.String BaseExpired = "base-expired"
   const System.String ClockSkew = "clock-skew"
   const System.String Forbidden = "forbidden"
+  const System.String GroupAborted = "group-aborted"
+  const System.String GroupFailed = "group-failed"
+  const System.String GroupsUnsupported = "groups-unsupported"
   const System.String Invalid = "invalid"
   const System.String OperationIdReused = "operation-id-reused"
   const System.String Unavailable = "unavailable"
 record BlazorSync.Protocol.PushOperation<TDocument> where TDocument : class, BlazorSync.ISyncEntity
   System.Boolean Equals(BlazorSync.Protocol.PushOperation<TDocument> other)
+  System.Int32 GroupSize { get; init; }
   System.Int64? BaseVersion { get; init; }
   System.String DocumentId { get; init; }
+  System.String Group { get; init; }
   System.String OperationId { get; init; }
   System.Void Deconstruct(out System.String OperationId, out System.String DocumentId, out System.Int64? BaseVersion, out TDocument Document)
   TDocument Document { get; init; }
@@ -232,6 +250,8 @@ record BlazorSync.Protocol.StreamEvent<TDocument> where TDocument : class, Blazo
   virtual System.Boolean Equals(System.Object obj)
   virtual System.Int32 GetHashCode()
   virtual System.String ToString()
+static class BlazorSync.Protocol.SyncFeatures
+  const System.String Groups = "groups"
 record BlazorSync.Protocol.SyncJsonTypes<TDocument> where TDocument : class, BlazorSync.ISyncEntity
   System.Boolean Equals(BlazorSync.Protocol.SyncJsonTypes<TDocument> other)
   System.Text.Json.Serialization.Metadata.JsonTypeInfo<BlazorSync.Protocol.PullRequest> PullRequest { get; init; }
@@ -364,6 +384,7 @@ interface BlazorSync.Storage.ILocalStore<TDocument> where TDocument : class, Bla
   abstract System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<BlazorSync.Storage.SyncRecord<TDocument>>> GetRejectedAsync(System.Int32 limit, System.Threading.CancellationToken cancellationToken = default)
   abstract System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<BlazorSync.Storage.SyncRecord<TDocument>>> GetStaleAsync(System.Int64 generation, System.Int32 limit, System.Threading.CancellationToken cancellationToken = default)
   abstract System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TDocument>> QueryAsync(System.Boolean includeDeleted = false, System.Threading.CancellationToken cancellationToken = default)
+  abstract System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TDocument>> QueryPageAsync(System.String afterId, System.Int32 limit, System.Boolean includeDeleted = false, System.Threading.CancellationToken cancellationToken = default)
   abstract System.Threading.Tasks.Task<System.Int32> CountDirtyAsync(System.Threading.CancellationToken cancellationToken = default)
   abstract System.Threading.Tasks.Task<System.Int32> PurgeAsync(System.Collections.Generic.IReadOnlyList<System.String> ids, System.Int64 generation, System.Threading.CancellationToken cancellationToken = default)
 sealed class BlazorSync.Storage.InMemoryLocalStore<TDocument> : BlazorSync.Storage.ILocalStore<TDocument> where TDocument : class, BlazorSync.ISyncEntity
@@ -376,6 +397,7 @@ sealed class BlazorSync.Storage.InMemoryLocalStore<TDocument> : BlazorSync.Stora
   System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<BlazorSync.Storage.SyncRecord<TDocument>>> GetRejectedAsync(System.Int32 limit, System.Threading.CancellationToken cancellationToken = default)
   System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<BlazorSync.Storage.SyncRecord<TDocument>>> GetStaleAsync(System.Int64 generation, System.Int32 limit, System.Threading.CancellationToken cancellationToken = default)
   System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TDocument>> QueryAsync(System.Boolean includeDeleted = false, System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TDocument>> QueryPageAsync(System.String afterId, System.Int32 limit, System.Boolean includeDeleted = false, System.Threading.CancellationToken cancellationToken = default)
   System.Threading.Tasks.Task<System.Int32> CountDirtyAsync(System.Threading.CancellationToken cancellationToken = default)
   System.Threading.Tasks.Task<System.Int32> PurgeAsync(System.Collections.Generic.IReadOnlyList<System.String> ids, System.Int64 generation, System.Threading.CancellationToken cancellationToken = default)
   ctor()
@@ -385,8 +407,10 @@ sealed class BlazorSync.Storage.LocalStoreUnavailableException : System.Exceptio
   ctor(System.String reason, System.String message, System.Exception innerException = null)
 record BlazorSync.Storage.PendingOperation<TDocument> where TDocument : class, BlazorSync.ISyncEntity
   System.Boolean Equals(BlazorSync.Storage.PendingOperation<TDocument> other)
+  System.Int32 GroupSize { get; init; }
   System.Int64 Revision { get; init; }
   System.Int64? BaseVersion { get; init; }
+  System.String Group { get; init; }
   System.String OperationId { get; init; }
   System.Void Deconstruct(out System.String OperationId, out System.Int64 Revision, out System.Int64? BaseVersion, out TDocument Payload)
   TDocument Payload { get; init; }
@@ -444,9 +468,19 @@ record BlazorSync.Storage.SyncConflict<TDocument> where TDocument : class, Blazo
   virtual System.Boolean Equals(System.Object obj)
   virtual System.Int32 GetHashCode()
   virtual System.String ToString()
+record BlazorSync.Storage.SyncGroup
+  System.Boolean Equals(BlazorSync.Storage.SyncGroup other)
+  System.Collections.Generic.IReadOnlyList<System.String> Members { get; init; }
+  System.String Id { get; init; }
+  System.Void Deconstruct(out System.String Id, out System.Collections.Generic.IReadOnlyList<System.String> Members)
+  ctor(System.String Id, System.Collections.Generic.IReadOnlyList<System.String> Members)
+  virtual System.Boolean Equals(System.Object obj)
+  virtual System.Int32 GetHashCode()
+  virtual System.String ToString()
 record BlazorSync.Storage.SyncRecord<TDocument> where TDocument : class, BlazorSync.ISyncEntity
   BlazorSync.Storage.PendingOperation<TDocument> Pending { get; init; }
   BlazorSync.Storage.SyncConflict<TDocument> Conflict { get; init; }
+  BlazorSync.Storage.SyncGroup Group { get; init; }
   BlazorSync.Storage.SyncRejection Rejection { get; init; }
   System.Boolean Equals(BlazorSync.Storage.SyncRecord<TDocument> other)
   System.Boolean IsDirty { get; init; }
@@ -500,11 +534,13 @@ sealed class BlazorSync.SyncEngine<TDocument> where TDocument : class, BlazorSyn
   System.Threading.Tasks.Task<BlazorSync.SyncResult> SyncAsync(System.Threading.CancellationToken cancellationToken = default)
   System.Threading.Tasks.Task<System.Boolean> DiscardConflictAsync(System.String id, System.Threading.CancellationToken cancellationToken = default)
   System.Threading.Tasks.Task<System.Boolean> RevertAsync(System.String id, System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<BlazorSync.LocalWriteReceipt>> WriteGroupAsync(System.Collections.Generic.IReadOnlyList<TDocument> documents, System.Threading.CancellationToken cancellationToken = default)
   System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<BlazorSync.Storage.SyncRecord<TDocument>>> ExportLocalChangesAsync(System.Threading.CancellationToken cancellationToken = default)
   System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<BlazorSync.Storage.SyncRecord<TDocument>>> GetConflictsAsync(System.Int32 limit = 100, System.Threading.CancellationToken cancellationToken = default)
   System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<BlazorSync.Storage.SyncRecord<TDocument>>> GetRejectedAsync(System.Int32 limit = 100, System.Threading.CancellationToken cancellationToken = default)
   System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<System.String>> ImportLocalChangesAsync(System.Collections.Generic.IReadOnlyList<BlazorSync.Storage.SyncRecord<TDocument>> records, System.Threading.CancellationToken cancellationToken = default)
   System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TDocument>> QueryAsync(System.Boolean includeDeleted = false, System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TDocument>> QueryPageAsync(System.String afterId, System.Int32 limit, System.Boolean includeDeleted = false, System.Threading.CancellationToken cancellationToken = default)
   System.Threading.Tasks.Task<System.Int32> CountDirtyAsync(System.Threading.CancellationToken cancellationToken = default)
   ctor(BlazorSync.Storage.ILocalStore<TDocument> store, BlazorSync.Transport.ISyncTransport<TDocument> transport, BlazorSync.Clocks.HybridLogicalClock clock, BlazorSync.Conflicts.IConflictHandler<TDocument> conflictHandler = null, BlazorSync.SyncOptions<TDocument> options = null)
   ctor(BlazorSync.Storage.ILocalStore<TDocument> store, BlazorSync.Transport.ISyncTransport<TDocument> transport, BlazorSync.Clocks.HybridLogicalClock clock, System.Func<TDocument, TDocument> cloner, BlazorSync.Conflicts.IConflictHandler<TDocument> conflictHandler = null, BlazorSync.SyncOptions<TDocument> options = null)

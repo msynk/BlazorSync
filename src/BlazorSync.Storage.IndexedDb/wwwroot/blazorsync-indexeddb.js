@@ -1,6 +1,6 @@
 // BlazorSync IndexedDB store: a deliberately small bridge. All protocol logic stays in .NET.
 //
-// Layout (schema version 2), one database per account namespace:
+// Layout (schema version 3), one database per account namespace:
 //   records: keyPath ["collection", "id"]; values carry serialized documents as strings and every 64-bit
 //            number as a decimal string (JavaScript numbers lose precision above 2^53).
 //            Sparse index keys (present only when the record qualifies):
@@ -15,7 +15,7 @@
 // Writes are optimistic: .NET reads records with their write stamps, computes new states, and commits in
 // one readwrite transaction that aborts if any stamp changed. No transaction spans a .NET await.
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 const databases = new Map();
 let nextHandle = 1;
 
@@ -74,6 +74,8 @@ function openDatabase(name, blockedTimeoutMs) {
         // 1 -> 2: unresolved conflicts. Additive; existing records are untouched.
         req.transaction.objectStore("records").createIndex("conflicts", "conflictKey");
       }
+      // 2 -> 3: dependency groups are plain record fields (no index). The version still changes so that tabs running
+      // an older application, which would drop the group fields when writing, are closed ("outdated").
     };
     req.onblocked = () => {
       blockedTimer = setTimeout(() => reject(fail("blocked", "Another tab keeps an older version of the database open.")), blockedTimeoutMs);
@@ -315,6 +317,17 @@ export async function rejected(handle, collection, limit) {
   const db = await connection(handle);
   const index = db.transaction("records", "readonly").objectStore("records").index("dirty");
   return JSON.stringify(await collect(index, prefix(collection), limit, (r) => r.rejectionCode !== null && r.rejectionCode !== undefined));
+}
+
+// One bounded page in id order; string keys compare by UTF-16 code units, which is ordinal order.
+export async function queryPage(handle, collection, afterId, limit, includeDeleted) {
+  const db = await connection(handle);
+  const index = db.transaction("records", "readonly").objectStore("records").index(includeDeleted ? "visible" : "live");
+  const range = afterId === null || afterId === undefined
+    ? prefix(collection)
+    : IDBKeyRange.bound([collection, afterId], [collection, []], true, false);
+  const records = await collect(index, range, limit, () => true);
+  return JSON.stringify(records.map((r) => r.current));
 }
 
 export async function query(handle, collection, includeDeleted) {

@@ -300,6 +300,27 @@ public static class LocalStoreConformance
             Check.Null((await store.GetAsync("b"))!.Conflict!.Base);
         }),
 
+        new("Store I19: a dependency group and a grouped pending operation round-trip", async create =>
+        {
+            var store = await create();
+            var payload = new ConformanceDocument { Id = "g1", Title = "p", UpdatedAt = new HlcTimestamp(2, 0, "n") };
+            await store.UpdateAsync([Put(Dirty("g1", 2) with
+            {
+                Group = new SyncGroup("grp-1", ["g1", "g2", "é"]),
+                Pending = new PendingOperation<ConformanceDocument>("op-g", 1, null, payload) { Group = "grp-1", GroupSize = 3 },
+            }), Put(Dirty("plain", 3))]);
+
+            var read = (await store.GetAsync("g1"))!;
+            Check.Equal("grp-1", read.Group!.Id);
+            Check.Equal("g1,g2,é", string.Join(",", read.Group.Members));
+            Check.Equal(("grp-1", 3), (read.Pending!.Group, read.Pending.GroupSize));
+            var plain = (await store.GetAsync("plain"))!;
+            Check.Null(plain.Group);
+
+            await store.UpdateAsync([new("g1", r => r! with { Group = null, Pending = null })]);
+            Check.Null((await store.GetAsync("g1"))!.Group);
+        }),
+
         new("Store I19: rejected records are listed in id order, bounded, until a new edit clears the rejection", async create =>
         {
             var store = await create();
@@ -326,6 +347,38 @@ public static class LocalStoreConformance
             Check.Equal(new ReplicaCursor(Checkpoint.Start, 2, true, true), await store.GetCursorAsync());
             await store.UpdateAsync([], new ReplicaCursor(new Checkpoint("cp"), 2, Resnapshot: false, PurgeMissing: false));
             Check.Equal(new ReplicaCursor(new Checkpoint("cp"), 2, false, false), await store.GetCursorAsync());
+        }),
+
+        new("Store I08 T59: paged queries walk the visible documents in ordinal id order, bounded and resumable", async create =>
+        {
+            var store = await create();
+            var ids = new[] { "b", "a", "\u00e9", "Z", "\ud83d\ude00", "\uffff", "a0", "tomb", "hidden" };
+            await store.UpdateAsync(ids.Select(id => Put(id switch
+            {
+                "tomb" => Dirty(id, 1) with { Current = new ConformanceDocument { Id = id, Deleted = true, UpdatedAt = new HlcTimestamp(1, 0, "n") } },
+                "hidden" => Dirty(id, 1) with { IsDirty = false, MissingAfterReset = true },
+                _ => Dirty(id, 1),
+            })).ToList());
+
+            var walked = new List<string>();
+            string? after = null;
+            while (true)
+            {
+                var page = await store.QueryPageAsync(after, 2);
+                Check.True(page.Count <= 2);
+                if (page.Count == 0)
+                {
+                    break;
+                }
+
+                walked.AddRange(page.Select(d => d.Id));
+                after = page[^1].Id;
+            }
+
+            var expected = ids.Where(id => id is not "tomb" and not "hidden").Order(StringComparer.Ordinal).ToList();
+            Check.Equal(string.Join("|", expected), string.Join("|", walked));
+            Check.Equal("tomb", string.Join("|", (await store.QueryPageAsync("b", 10, includeDeleted: true)).Select(d => d.Id).Where(id => id == "tomb")));
+            Check.Equal(0, (await store.QueryPageAsync("\uffff", 10)).Count);
         }),
 
         new("Store: queries hide tombstones unless asked", async create =>

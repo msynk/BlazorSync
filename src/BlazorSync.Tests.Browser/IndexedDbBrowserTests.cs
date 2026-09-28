@@ -209,7 +209,7 @@ public sealed class IndexedDbBrowserTests(BrowserFixture fixture)
         var newTab = await HarnessPage.OpenAsync(context, fixture.BaseAddress);
         Assert.Equal("ok", await oldTab.CallAsync("OpenReplica", database, "old"));
 
-        // Any version above the current schema (2) stands in for a newer application.
+        // Any version above the current schema (3) stands in for a newer application.
         var upgrade = await newTab.Page.EvaluateAsync<string>(
             """
             name => new Promise(resolve => {
@@ -226,7 +226,7 @@ public sealed class IndexedDbBrowserTests(BrowserFixture fixture)
         Assert.Equal("error:store:outdated", await oldTab.CallAsync("OpenReplica", database, "old"));
     }
 
-    [Theory(DisplayName = "I01 I17: a schema 1 browser database with pending work upgrades to schema 2 and still uploads it once")]
+    [Theory(DisplayName = "I01 I17: a schema 1 browser database with pending work upgrades to the current schema (3) and still uploads it once")]
     [MemberData(nameof(Browsers))]
     public async Task SchemaOneUpgradeKeepsPendingWork(string browser)
     {
@@ -279,7 +279,7 @@ public sealed class IndexedDbBrowserTests(BrowserFixture fixture)
         Assert.Equal(1, (await page.SyncAsync()).Pushed);
         Assert.Equal("written by schema 1", fixture.Authority.Server.Snapshot().Single().Title);
         Assert.Equal(1, fixture.Authority.Server.ReceiptCount);
-        Assert.Equal(2, await page.Page.EvaluateAsync<int>(
+        Assert.Equal(3, await page.Page.EvaluateAsync<int>(
             "name => new Promise(ok => { const r = indexedDB.open(name); r.onsuccess = () => { const v = r.result.version; r.result.close(); ok(v); }; })",
             database));
     }

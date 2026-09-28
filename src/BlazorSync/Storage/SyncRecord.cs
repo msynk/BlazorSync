@@ -70,6 +70,12 @@ public sealed record SyncRecord<TDocument>(TDocument Current, TDocument? Base, b
     /// </summary>
     public SyncConflict<TDocument>? Conflict { get; init; }
 
+    /// <summary>
+    /// The dependency group this record's unsynchronized change belongs to (<c>SyncEngine.WriteGroupAsync</c>): the
+    /// group's changes are applied by the server all together or not at all. Cleared when the group is accepted.
+    /// </summary>
+    public SyncGroup? Group { get; init; }
+
     /// <summary>Whether the record is waiting to be pushed (dirty and not rejected).</summary>
     public bool IsPushable => IsDirty && Rejection is null;
 
@@ -88,7 +94,19 @@ public sealed record SyncRecord<TDocument>(TDocument Current, TDocument? Base, b
 /// <param name="BaseVersion">The server version the operation is based on.</param>
 /// <param name="Payload">The exact document state sent to the server.</param>
 public sealed record PendingOperation<TDocument>(string OperationId, long Revision, long? BaseVersion, TDocument Payload)
-    where TDocument : class, ISyncEntity;
+    where TDocument : class, ISyncEntity
+{
+    /// <summary>The dependency group sent with the operation, if any.</summary>
+    public string? Group { get; init; }
+
+    /// <summary>The number of operations of <see cref="Group"/> sent together (0 without a group).</summary>
+    public int GroupSize { get; init; }
+}
+
+/// <summary>A set of documents whose changes must be applied together (all or nothing).</summary>
+/// <param name="Id">The group id.</param>
+/// <param name="Members">The ids of the documents in the group.</param>
+public sealed record SyncGroup(string Id, IReadOnlyList<string> Members);
 
 /// <summary>A permanent server rejection of one local revision.</summary>
 /// <param name="Revision">The local revision that was rejected.</param>

@@ -8,6 +8,7 @@ of magnitude and as a baseline for regressions, not as performance claims for an
 dotnet run -c Release --project src/BlazorSync.Benchmarks -- --filter "*LocalWrite*" "*LocalRead*" "*Merge*" --job short
 dotnet run -c Release --project src/BlazorSync.Benchmarks -- --filter "*Reconnect*"
 dotnet run -c Release --project src/BlazorSync.Benchmarks -- --filter "*InitialPull*"
+dotnet run -c Release --project src/BlazorSync.Benchmarks -- --filter "*ScalePull*"
 ```
 
 ## Recorded run (2026-09-28)
@@ -50,6 +51,19 @@ The page size was 500. The run used the same job as the reconnect benchmark.
 | in-memory | 243 ms | 239 MB |
 | SQLite, `synchronous=FULL` | 1.00 s | 348 MB |
 
+### Scale: a new replica pulls 100,000 documents
+
+The page size was 1,000. Each run was a Monitoring run of 2 iterations. It was run twice: once alongside other
+work on the machine, and once alone.
+
+| Store | Mean (run alone) | Mean (other run) | Allocated |
+|---|---:|---:|---:|
+| in-memory | 6.8 s (±2.6 s between iterations) | 5.3 s | 2.43 GB |
+| SQLite, `synchronous=FULL` | 14.3 s | 16.4 s | 3.57 GB |
+
+Allocated is the total over the run, not peak memory. Time grows roughly linearly from 10,000 documents (about
+10× for 10× the data).
+
 ### Conflict handling
 
 | Operation | Mean | Allocated |
@@ -65,7 +79,7 @@ The page size was 500. The run used the same job as the reconnect benchmark.
 - Allocation per synced document is high: about 64 KB per document to push and 24 KB to pull. JSON cloning
   for isolation and fingerprinting dominates. This is the first thing to optimize if memory matters.
 - Not measured:
-  - the 100,000-document scale workload;
-  - multi-process servers and concurrent sessions, which need the database authority (Phase 4);
+  - peak memory;
+  - PostgreSQL throughput with concurrent sessions (the authority exists; no benchmark yet);
   - IndexedDB in browsers;
   - network latency.

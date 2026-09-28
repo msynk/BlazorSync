@@ -45,4 +45,10 @@ public sealed record PullResult<TDocument>(
     [property: JsonPropertyName("changes"), JsonRequired] IReadOnlyList<RemoteChange<TDocument>> Changes,
     [property: JsonPropertyName("checkpoint"), JsonRequired] Checkpoint Checkpoint,
     [property: JsonPropertyName("hasMore"), JsonRequired] bool HasMore)
-    where TDocument : class, ISyncEntity;
+    where TDocument : class, ISyncEntity
+{
+    /// <summary>Optional protocol features this server supports (see <see cref="SyncFeatures"/>); absent means none.</summary>
+    [JsonPropertyName("features")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? Features { get; init; }
+}
