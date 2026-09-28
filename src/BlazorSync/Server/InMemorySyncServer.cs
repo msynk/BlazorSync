@@ -39,6 +39,40 @@ public sealed class InMemorySyncServerOptions<TDocument>
     public int MaxPageSize { get; init; } = 1000;
 
     /// <summary>
+    /// A backup to start from (see <see cref="InMemorySyncServer{TDocument}.CreateBackup"/>). The restored
+    /// server gets a new epoch, so replicas holding checkpoints from the original must reset.
+    /// </summary>
+    public InMemorySyncServerBackup<TDocument>? RestoreFrom { get; init; }
+
+    /// <summary>
+    /// The lowest version the server may issue next is <c>VersionFloor + 1</c>. After a restore, set it at or
+    /// above every version the lost history may have issued, so no version is ever reused for a different
+    /// state (docs/protocol/v1.md, section 6).
+    /// </summary>
+    public long VersionFloor { get; init; }
+
+    /// <summary>
+    /// Optional fingerprint of what the caller may see (for example a hash of roles, grants or a filter). It is
+    /// bound into every checkpoint; when it changes, the caller's old checkpoint yields
+    /// <see cref="ResetReasons.ScopeChanged"/> and the replica resnapshots, which removes documents it may no longer
+    /// read and brings back regranted ones even if they did not change.
+    /// </summary>
+    public Func<SyncCallContext, string>? ScopeFingerprint { get; init; }
+
+    /// <summary>
+    /// Optional read authorization. Documents the caller may not read are left out of its pull pages, and
+    /// conflict or replayed outcomes that would reveal such a document are returned as
+    /// <see cref="PushErrorCodes.Forbidden"/> rejections without the document.
+    /// </summary>
+    public Func<SyncCallContext, TDocument, bool>? CanRead { get; init; }
+
+    /// <summary>
+    /// Optional write authorization, checked before validation. Receives the operation and the current
+    /// state (if any). A refused write is rejected with <see cref="PushErrorCodes.Forbidden"/>.
+    /// </summary>
+    public Func<SyncCallContext, PushOperation<TDocument>, TDocument?, bool>? CanWrite { get; init; }
+
+    /// <summary>
     /// Optional application validation. Return <see langword="null"/> to allow the operation, or an error
     /// code to reject it permanently. Receives the operation and the current server state, if any.
     /// </summary>
@@ -59,12 +93,15 @@ public sealed class InMemorySyncServerOptions<TDocument>
 /// </para>
 /// <para>
 /// State, including operation receipts, lives only for the lifetime of the instance; receipts are never
-/// expired. It performs no authentication or authorization and is intended for tests, samples and
+/// expired. It performs no authentication; authorization is delegated to the optional
+/// <see cref="InMemorySyncServerOptions{TDocument}.CanRead"/> and
+/// <see cref="InMemorySyncServerOptions{TDocument}.CanWrite"/> hooks, and scopes are isolated by giving each
+/// scope its own instance (<see cref="ScopedAuthority{TDocument}"/>). Intended for tests, samples and
 /// in-process hosting only.
 /// </para>
 /// </remarks>
 /// <typeparam name="TDocument">The synchronized entity type.</typeparam>
-public sealed class InMemorySyncServer<TDocument>
+public sealed class InMemorySyncServer<TDocument> : ISyncAuthority<TDocument>, ISyncDocumentReader<TDocument>, ISyncCommitNotifier
     where TDocument : class, ISyncEntity
 {
     private readonly Dictionary<string, Entry> _documents = new(StringComparer.Ordinal);
@@ -75,6 +112,7 @@ public sealed class InMemorySyncServer<TDocument>
     private readonly InMemorySyncServerOptions<TDocument> _options;
     private readonly object _gate = new();
     private long _sequence;
+    private long _purgedThrough;
 
     /// <summary>
     /// Creates a server that clones and fingerprints documents with reflection-based JSON (not
@@ -111,7 +149,54 @@ public sealed class InMemorySyncServer<TDocument>
         _clone = options.Cloner;
         _fingerprint = options.Fingerprint;
         _physical = options.PhysicalClock ?? SystemPhysicalClock.Instance;
+        ArgumentOutOfRangeException.ThrowIfNegative(options.VersionFloor, nameof(options.VersionFloor));
+        _sequence = options.VersionFloor;
+        if (options.RestoreFrom is { } backup)
+        {
+            foreach (var (id, entry) in backup.Documents)
+            {
+                _documents[id] = new Entry(_clone(entry.Document), entry.Version);
+            }
+
+            foreach (var (id, receipt) in backup.Receipts)
+            {
+                _receipts[id] = new Receipt(receipt.Fingerprint, receipt.Outcome with { Document = receipt.Outcome.Document is { } d ? _clone(d) : null });
+            }
+
+            _sequence = Math.Max(_sequence, backup.Sequence);
+            _purgedThrough = backup.PurgedThrough;
+        }
+
         Epoch = $"{serverId}-{Guid.NewGuid():N}";
+    }
+
+    /// <summary>
+    /// Copies the documents, operation receipts and version sequence, as a database backup would.
+    /// Starting a server from it (<see cref="InMemorySyncServerOptions{TDocument}.RestoreFrom"/>) simulates a
+    /// restore that loses everything committed after this point.
+    /// </summary>
+    public InMemorySyncServerBackup<TDocument> CreateBackup()
+    {
+        lock (_gate)
+        {
+            return new InMemorySyncServerBackup<TDocument>(
+                _documents.ToDictionary(kv => kv.Key, kv => (_clone(kv.Value.Document), kv.Value.Version), StringComparer.Ordinal),
+                _receipts.ToDictionary(kv => kv.Key, kv => (kv.Value.Fingerprint, kv.Value.Outcome with { Document = kv.Value.Outcome.Document is { } d ? _clone(d) : null }), StringComparer.Ordinal),
+                _sequence,
+                _purgedThrough);
+        }
+    }
+
+    /// <summary>The highest version issued so far (diagnostics).</summary>
+    public long HighestVersion
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _sequence;
+            }
+        }
     }
 
     /// <summary>
@@ -131,17 +216,52 @@ public sealed class InMemorySyncServer<TDocument>
         }
     }
 
+    /// <inheritdoc />
+    public AuthorityLimits Limits => new(_options.MaxOperationsPerPush, _options.MaxPageSize);
+
+    /// <inheritdoc />
+    public Task<PullResult<TDocument>> PullAsync(SyncCallContext context, PullRequest request, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(Pull(context, request));
+    }
+
+    /// <inheritdoc />
+    public Task<PushResult<TDocument>> PushAsync(SyncCallContext context, PushRequest<TDocument> request, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(Push(context, request));
+    }
+
+    /// <summary>Serves the next page of changes for an anonymous caller.</summary>
+    public PullResult<TDocument> Pull(PullRequest request) => Pull(SyncCallContext.Anonymous, request);
+
+    /// <summary>Decides a push for an anonymous caller.</summary>
+    public PushResult<TDocument> Push(PushRequest<TDocument> request) => Push(SyncCallContext.Anonymous, request);
+
     /// <summary>Serves the next page of changes strictly after <paramref name="request"/>'s checkpoint.</summary>
     /// <exception cref="SyncResetRequiredException">The checkpoint belongs to a different epoch.</exception>
-    /// <exception cref="SyncProtocolException">The checkpoint is malformed.</exception>
-    public PullResult<TDocument> Pull(PullRequest request)
+    /// <exception cref="SyncProtocolException">The checkpoint or batch size is malformed.</exception>
+    public PullResult<TDocument> Pull(SyncCallContext context, PullRequest request)
     {
-        ArgumentOutOfRangeException.ThrowIfLessThan(request.BatchSize, 1, nameof(request.BatchSize));
-        var since = ParseCheckpoint(request.Since);
+        ArgumentNullException.ThrowIfNull(context);
+        if (request.BatchSize < 1)
+        {
+            throw new SyncProtocolException("The pull limit must be at least 1.");
+        }
+
+        var since = ParseCheckpoint(context, request.Since);
         var limit = Math.Min(request.BatchSize, _options.MaxPageSize);
 
         lock (_gate)
         {
+            // Tombstones at or below the horizon are gone: a replica that has not seen everything up to it cannot
+            // learn about those deletions incrementally and must resnapshot.
+            if (since > 0 && since < _purgedThrough)
+            {
+                throw new SyncResetRequiredException("The checkpoint is older than the retention horizon.", ResetReasons.Expired);
+            }
+
             var candidates = _documents.Values
                 .Where(e => e.Version > since)
                 .OrderBy(static e => e.Version)
@@ -149,13 +269,16 @@ public sealed class InMemorySyncServer<TDocument>
                 .ToList();
 
             var hasMore = candidates.Count > limit;
-            var page = candidates
-                .Take(limit)
+            var window = candidates.Take(limit).ToList();
+
+            // Unreadable documents are skipped, but the checkpoint still moves past them.
+            var page = window
+                .Where(e => _options.CanRead?.Invoke(context, e.Document) ?? true)
                 .Select(e => new RemoteChange<TDocument>(_clone(e.Document), e.Version))
                 .ToList();
 
-            var position = page.Count > 0 ? page[^1].Version : Math.Max(since, 0);
-            return new PullResult<TDocument>(page, FormatCheckpoint(position), hasMore);
+            var position = window.Count > 0 ? window[^1].Version : Math.Max(since, 0);
+            return new PullResult<TDocument>(page, FormatCheckpoint(context, position), hasMore);
         }
     }
 
@@ -163,15 +286,22 @@ public sealed class InMemorySyncServer<TDocument>
     /// Applies a batch of independent operations and returns exactly one outcome per operation, in
     /// request order.
     /// </summary>
-    /// <exception cref="ArgumentException">The request exceeds <see cref="InMemorySyncServerOptions{TDocument}.MaxOperationsPerPush"/>.</exception>
-    public PushResult<TDocument> Push(PushRequest<TDocument> request)
+    /// <exception cref="SyncTransportException">The request exceeds <see cref="InMemorySyncServerOptions{TDocument}.MaxOperationsPerPush"/> (<c>payload-too-large</c>).</exception>
+    public PushResult<TDocument> Push(SyncCallContext context, PushRequest<TDocument> request)
     {
+        ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(request);
-        ArgumentNullException.ThrowIfNull(request.Operations);
+        if (request.Operations is null)
+        {
+            throw new SyncProtocolException("The push request has no operations.");
+        }
+
         if (request.Operations.Count > _options.MaxOperationsPerPush)
         {
-            throw new ArgumentException(
-                $"A push may carry at most {_options.MaxOperationsPerPush} operations.", nameof(request));
+            throw new SyncTransportException(
+                SyncErrorCodes.PayloadTooLarge,
+                $"A push may carry at most {_options.MaxOperationsPerPush} operations.",
+                isTransient: false);
         }
 
         var outcomes = new List<PushOutcome<TDocument>>(request.Operations.Count);
@@ -180,11 +310,59 @@ public sealed class InMemorySyncServer<TDocument>
         {
             foreach (var operation in request.Operations)
             {
-                outcomes.Add(Apply(operation, documentsInRequest));
+                outcomes.Add(Visible(context, Apply(context, operation, documentsInRequest)));
             }
         }
 
+        var committed = request.Operations
+            .Zip(outcomes)
+            .Where(pair => pair.Second is { Kind: PushOutcomeKind.Accepted, IsDuplicate: false })
+            .Select(pair => pair.First.DocumentId)
+            .ToList();
+        if (committed.Count > 0)
+        {
+            // Outside the lock: handlers must never delay or block writers.
+            Committed?.Invoke(new AuthorityCommit(context.Scope, committed));
+        }
+
         return new PushResult<TDocument>(outcomes);
+    }
+
+    /// <inheritdoc />
+    public event Action<AuthorityCommit>? Committed;
+
+    /// <inheritdoc />
+    public Task<StoredDocument<TDocument>?> GetAsync(SyncCallContext context, string id, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(id);
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (_gate)
+        {
+            return Task.FromResult(
+                _documents.TryGetValue(id, out var entry) && (_options.CanRead?.Invoke(context, entry.Document) ?? true)
+                    ? new StoredDocument<TDocument>(_clone(entry.Document), entry.Version)
+                    : null);
+        }
+    }
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<StoredDocument<TDocument>>> ListAsync(SyncCallContext context, int limit, string? afterId = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (_gate)
+        {
+            IReadOnlyList<StoredDocument<TDocument>> page = _documents
+                .Where(kv => afterId is null || string.CompareOrdinal(kv.Key, afterId) > 0)
+                .Where(kv => !kv.Value.Document.Deleted && (_options.CanRead?.Invoke(context, kv.Value.Document) ?? true))
+                .OrderBy(kv => kv.Key, StringComparer.Ordinal)
+                .Take(Math.Min(limit, _options.MaxPageSize))
+                .Select(kv => new StoredDocument<TDocument>(_clone(kv.Value.Document), kv.Value.Version))
+                .ToList();
+            return Task.FromResult(page);
+        }
     }
 
     /// <summary>Returns a snapshot of the current documents (test/diagnostic helper).</summary>
@@ -209,7 +387,13 @@ public sealed class InMemorySyncServer<TDocument>
         }
     }
 
-    private PushOutcome<TDocument> Apply(PushOperation<TDocument>? operation, HashSet<string> documentsInRequest)
+    /// <summary>Never reveals a document the caller may not read, whether the outcome is fresh or replayed.</summary>
+    private PushOutcome<TDocument> Visible(SyncCallContext context, PushOutcome<TDocument> outcome) =>
+        outcome.Document is { } document && _options.CanRead is { } canRead && !canRead(context, document)
+            ? PushOutcome<TDocument>.Rejected(outcome.OperationId, PushErrorCodes.Forbidden) with { IsDuplicate = outcome.IsDuplicate }
+            : outcome;
+
+    private PushOutcome<TDocument> Apply(SyncCallContext context, PushOperation<TDocument>? operation, HashSet<string> documentsInRequest)
     {
         if (operation is null || !SyncIds.IsValid(operation.OperationId))
         {
@@ -238,12 +422,12 @@ public sealed class InMemorySyncServer<TDocument>
                 : PushOutcome<TDocument>.Rejected(opId, PushErrorCodes.OperationIdReused, "The operation id was already used for a different request.");
         }
 
-        var outcome = Decide(operation);
+        var outcome = Decide(context, operation);
         _receipts[opId] = new Receipt(fingerprint, outcome with { Document = outcome.Document is { } doc ? _clone(doc) : null });
         return outcome;
     }
 
-    private PushOutcome<TDocument> Decide(PushOperation<TDocument> operation)
+    private PushOutcome<TDocument> Decide(SyncCallContext context, PushOperation<TDocument> operation)
     {
         var opId = operation.OperationId;
         var id = operation.DocumentId;
@@ -254,6 +438,18 @@ public sealed class InMemorySyncServer<TDocument>
         }
 
         _documents.TryGetValue(id, out var current);
+
+        // Without the document and with a base at or below the horizon, it may have been deleted and purged:
+        // accepting would resurrect it. A base above the horizon (a restore lost it) is still accepted.
+        if (current is null && operation.BaseVersion is { } baseVersion && baseVersion <= _purgedThrough)
+        {
+            return PushOutcome<TDocument>.Rejected(opId, PushErrorCodes.BaseExpired, "The document no longer exists on the server.");
+        }
+
+        if (_options.CanWrite is { } canWrite && !canWrite(context, operation, current is null ? null : _clone(current.Document)))
+        {
+            return PushOutcome<TDocument>.Rejected(opId, PushErrorCodes.Forbidden);
+        }
 
         if (_options.Validator?.Invoke(operation, current is null ? null : _clone(current.Document)) is { } error)
         {
@@ -281,10 +477,75 @@ public sealed class InMemorySyncServer<TDocument>
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
     }
 
-    private Checkpoint FormatCheckpoint(long position) =>
-        new(string.Create(CultureInfo.InvariantCulture, $"{Epoch}:{position}"));
+    /// <summary>
+    /// Removes tombstones with a version at or below <paramref name="throughVersion"/> and raises the retention
+    /// horizon. Afterwards, checkpoints below the horizon get <see cref="ResetReasons.Expired"/>, and a write based on
+    /// a version at or below it for a document that no longer exists is rejected with
+    /// <see cref="PushErrorCodes.BaseExpired"/>, so a long-offline replica cannot resurrect a purged document.
+    /// </summary>
+    /// <returns>The number of tombstones removed.</returns>
+    public int PurgeTombstones(long throughVersion)
+    {
+        lock (_gate)
+        {
+            throughVersion = Math.Min(throughVersion, _sequence);
+            var expired = _documents.Where(kv => kv.Value.Document.Deleted && kv.Value.Version <= throughVersion).Select(kv => kv.Key).ToList();
+            foreach (var id in expired)
+            {
+                _documents.Remove(id);
+            }
 
-    private long ParseCheckpoint(Checkpoint checkpoint)
+            _purgedThrough = Math.Max(_purgedThrough, throughVersion);
+            return expired.Count;
+        }
+    }
+
+    /// <summary>Removes receipts of operations accepted at or below <paramref name="throughVersion"/>.</summary>
+    /// <remarks>
+    /// Keep receipts longer than any replica may stay offline. A replay after its receipt is gone can never be applied
+    /// twice (the accepted write changed the version, so the replay's base no longer matches), but it is answered as a
+    /// conflict, so the replica's conflict handler runs for a write that had in fact succeeded.
+    /// </remarks>
+    /// <returns>The number of receipts removed.</returns>
+    public int PurgeReceipts(long throughVersion)
+    {
+        lock (_gate)
+        {
+            var expired = _receipts
+                .Where(kv => kv.Value.Outcome.Kind == PushOutcomeKind.Accepted && kv.Value.Outcome.Version <= throughVersion)
+                .Select(kv => kv.Key)
+                .ToList();
+            foreach (var opId in expired)
+            {
+                _receipts.Remove(opId);
+            }
+
+            return expired.Count;
+        }
+    }
+
+    /// <summary>The retention horizon: the highest version whose tombstones may have been purged.</summary>
+    public long PurgedThrough
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _purgedThrough;
+            }
+        }
+    }
+
+    // Checkpoint: "{epoch}~{scope}:{position}", where scope is a short hash of the caller's scope fingerprint.
+    private Checkpoint FormatCheckpoint(SyncCallContext context, long position) =>
+        new(string.Create(CultureInfo.InvariantCulture, $"{Epoch}~{ScopeHash(context)}:{position}"));
+
+    private string ScopeHash(SyncCallContext context) =>
+        _options.ScopeFingerprint is { } fingerprint
+            ? Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(fingerprint(context))))[..16]
+            : string.Empty;
+
+    private long ParseCheckpoint(SyncCallContext context, Checkpoint checkpoint)
     {
         if (checkpoint.IsStart)
         {
@@ -293,15 +554,27 @@ public sealed class InMemorySyncServer<TDocument>
 
         var value = checkpoint.Value!;
         var separator = value.LastIndexOf(':');
+        var scopeSeparator = value.LastIndexOf('~', Math.Max(separator, 0));
         if (separator <= 0
             || !long.TryParse(value.AsSpan(separator + 1), NumberStyles.None, CultureInfo.InvariantCulture, out var position))
         {
             throw new SyncProtocolException($"Malformed checkpoint '{value}'.");
         }
 
-        if (!value.AsSpan(0, separator).SequenceEqual(Epoch))
+        if (scopeSeparator <= 0)
         {
-            throw new SyncResetRequiredException("The checkpoint was issued by a different server epoch.");
+            // "{epoch}:{position}", issued before checkpoints carried a scope: resnapshot rather than strand the replica.
+            throw new SyncResetRequiredException("The checkpoint was issued by an older server version.", ResetReasons.Epoch);
+        }
+
+        if (!value.AsSpan(0, scopeSeparator).SequenceEqual(Epoch))
+        {
+            throw new SyncResetRequiredException("The checkpoint was issued by a different server epoch.", ResetReasons.Epoch);
+        }
+
+        if (!value.AsSpan(scopeSeparator + 1, separator - scopeSeparator - 1).SequenceEqual(ScopeHash(context)))
+        {
+            throw new SyncResetRequiredException("What this caller may see has changed since the checkpoint was issued.", ResetReasons.ScopeChanged);
         }
 
         return position;
@@ -310,4 +583,31 @@ public sealed class InMemorySyncServer<TDocument>
     private sealed record Entry(TDocument Document, long Version);
 
     private sealed record Receipt(string Fingerprint, PushOutcome<TDocument> Outcome);
+}
+
+/// <summary>A point-in-time copy of an <see cref="InMemorySyncServer{TDocument}"/>'s state.</summary>
+/// <typeparam name="TDocument">The synchronized entity type.</typeparam>
+public sealed class InMemorySyncServerBackup<TDocument>
+    where TDocument : class, ISyncEntity
+{
+    internal InMemorySyncServerBackup(
+        IReadOnlyDictionary<string, (TDocument Document, long Version)> documents,
+        IReadOnlyDictionary<string, (string Fingerprint, PushOutcome<TDocument> Outcome)> receipts,
+        long sequence,
+        long purgedThrough)
+    {
+        Documents = documents;
+        Receipts = receipts;
+        Sequence = sequence;
+        PurgedThrough = purgedThrough;
+    }
+
+    internal long PurgedThrough { get; }
+
+    internal IReadOnlyDictionary<string, (TDocument Document, long Version)> Documents { get; }
+
+    internal IReadOnlyDictionary<string, (string Fingerprint, PushOutcome<TDocument> Outcome)> Receipts { get; }
+
+    /// <summary>The highest version issued when the backup was taken.</summary>
+    public long Sequence { get; }
 }

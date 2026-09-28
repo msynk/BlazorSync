@@ -1,0 +1,8 @@
+<Project>
+
+  <!-- Every package carries the repository README (evaluated after the project, so IsPackable is final). -->
+  <ItemGroup Condition="'$(IsPackable)' == 'true'">
+    <None Include="$(MSBuildThisFileDirectory)..\README.md" Pack="true" PackagePath="\" Visible="false" />
+  </ItemGroup>
+
+</Project>

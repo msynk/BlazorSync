@@ -1,0 +1,76 @@
+# Build, test and pack on every push and pull request. Packages are uploaded as build artifacts only;
+# publishing to a feed is a separate, explicitly authorized step (ADR-012) and is not part of this workflow.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  test:
+    name: Unit, conformance, process-kill and HTTP tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - run: dotnet build src/BlazorSync.slnx -c Release
+      - run: dotnet test src/BlazorSync.Tests -c Release --no-build --logger "trx;LogFileName=unit.trx"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: unit-results-${{ matrix.os }}
+          path: src/BlazorSync.Tests/TestResults
+
+  browser:
+    name: Browser tests (Chromium, Firefox, WebKit)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - run: dotnet build src/BlazorSync.Tests.Browser -c Release
+      # The fixture installs the browsers itself; this also installs their system dependencies where needed.
+      - run: pwsh src/BlazorSync.Tests.Browser/bin/Release/net10.0/playwright.ps1 install --with-deps chromium firefox webkit
+      - run: dotnet test src/BlazorSync.Tests.Browser -c Release --no-build --logger "trx;LogFileName=browser.trx"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: browser-results
+          path: src/BlazorSync.Tests.Browser/TestResults
+
+  pack:
+    name: Pack (not published)
+    runs-on: ubuntu-latest
+    env:
+      CI: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - run: >-
+          for p in BlazorSync BlazorSync.Blazor BlazorSync.Server.AspNetCore BlazorSync.Storage.IndexedDb
+          BlazorSync.Storage.Sqlite BlazorSync.Testing BlazorSync.Transport.Http;
+          do dotnet pack src/$p -c Release -o artifacts/packages || exit 1; done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages
+          path: artifacts/packages

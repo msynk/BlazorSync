@@ -35,6 +35,13 @@ public enum ConflictOutcome
     /// based on the server's current version.
     /// </summary>
     KeepFork = 2,
+
+    /// <summary>
+    /// Adopt the server's state for now and keep the local change as an unresolved conflict
+    /// (<c>SyncRecord.Conflict</c>) for the application or user to resolve later. Nothing is lost and nothing is
+    /// pushed until then.
+    /// </summary>
+    Defer = 3,
 }
 
 /// <summary>The outcome of resolving a single conflict.</summary>
@@ -59,6 +66,9 @@ public sealed record ConflictResolution<TDocument>
 
     /// <summary>Discard the local change and keep the server's state.</summary>
     public static ConflictResolution<TDocument> AcceptMaster() => new(ConflictOutcome.UseMaster, null);
+
+    /// <summary>Show the server's state and keep the local change as an unresolved conflict.</summary>
+    public static ConflictResolution<TDocument> Defer() => new(ConflictOutcome.Defer, null);
 
     /// <summary>Keep the local state (and its authoring timestamp) and re-push it.</summary>
     public static ConflictResolution<TDocument> KeepFork() => new(ConflictOutcome.KeepFork, null);

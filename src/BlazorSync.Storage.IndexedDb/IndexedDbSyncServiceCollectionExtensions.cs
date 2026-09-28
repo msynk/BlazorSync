@@ -1,0 +1,75 @@
+using System.Text.Json.Serialization.Metadata;
+using BlazorSync.Blazor;
+using BlazorSync.Documents;
+using BlazorSync.Transport;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.JSInterop;
+
+namespace BlazorSync.Storage.IndexedDb;
+
+/// <summary>The browser (Blazor WebAssembly) registration recipe.</summary>
+public static class IndexedDbSyncServiceCollectionExtensions
+{
+    /// <summary>
+    /// Registers an <see cref="ISyncCollection{TDocument}"/> backed by an IndexedDB replica per signed-in account,
+    /// replicated by the one tab that holds the Web Locks lease. Call it in the WebAssembly client's
+    /// <c>Program.cs</c> only; the replica opens on first use, after the runtime is interactive.
+    /// </summary>
+    /// <param name="services">The WebAssembly client's services.</param>
+    /// <param name="collection">The collection name (also used in the lease name).</param>
+    /// <param name="documentType">Source-generated JSON metadata for the document type.</param>
+    /// <param name="transport">Creates the transport for an account (for example an <c>HttpSyncTransport</c> with that account's credentials).</param>
+    /// <param name="resolveAccount">
+    /// Returns the signed-in account id; each account gets its own database (<c>blazorsync-{account}</c>).
+    /// Default: <c>"default"</c> (single-user apps).
+    /// </param>
+    /// <param name="configure">Optional changes to intervals, backoff or conflict policy.</param>
+    public static IServiceCollection AddBrowserSyncCollection<TDocument>(
+        this IServiceCollection services,
+        string collection,
+        JsonTypeInfo<TDocument> documentType,
+        Func<IServiceProvider, string, ISyncTransport<TDocument>> transport,
+        Func<IServiceProvider, CancellationToken, Task<string>>? resolveAccount = null,
+        Func<SyncSessionOptions<TDocument>, SyncSessionOptions<TDocument>>? configure = null)
+        where TDocument : class, ISyncEntity
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(documentType);
+        ArgumentNullException.ThrowIfNull(transport);
+        if (!SyncIds.IsValid(collection))
+        {
+            throw new ArgumentException("The collection name must be a valid identifier.", nameof(collection));
+        }
+
+        return services.AddLocalSyncCollection<TDocument>(
+            sp =>
+            {
+                var js = sp.GetRequiredService<IJSRuntime>();
+                var options = new SyncSessionOptions<TDocument>
+                {
+                    Host = "browser",
+                    Cloner = DocumentCloner.Json(documentType),
+                    CreateTransport = account => transport(sp, account),
+                    OpenReplica = async (account, cancellationToken) =>
+                    {
+                        var store = await IndexedDbLocalStore<TDocument>.OpenAsync(
+                            js,
+                            new IndexedDbStoreOptions { DatabaseName = $"blazorsync-{account}", Collection = collection },
+                            documentType,
+                            cancellationToken).ConfigureAwait(false);
+                        var identity = await store.GetReplicaIdentityAsync(cancellationToken).ConfigureAwait(false);
+                        return new LocalReplica<TDocument>(store, identity.Incarnation);
+                    },
+                    AcquireLease = async (account, cancellationToken) =>
+                        await IndexedDbReplicaLease.TryAcquireAsync(js, $"blazorsync-{account}-{collection}", cancellationToken).ConfigureAwait(false),
+
+                    // Sync when the network returns or the tab is shown again, and on server hints when offered.
+                    AttachLifecycle = async (session, _, cancellationToken) =>
+                        await BrowserLifecycleWatcher.StartAsync(js, session.RequestSync, cancellationToken).ConfigureAwait(false),
+                    LiveHints = true,
+                };
+                return configure is null ? options : configure(options);
+            },
+            resolveAccount);
+    }
+}

@@ -1,6 +1,8 @@
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using BlazorSync.Clocks;
 using BlazorSync.Conflicts;
+using BlazorSync.Diagnostics;
 using BlazorSync.Documents;
 using BlazorSync.Protocol;
 using BlazorSync.Storage;
@@ -50,7 +52,11 @@ public sealed class SyncEngine<TDocument>
     private readonly SyncOptions<TDocument> _options;
     private readonly Func<TDocument, TDocument> _clone;
     private readonly SemaphoreSlim _replicationGate = new(1, 1);
+    private readonly object _observerGate = new();
+    private ImmutableObserverList _observers = ImmutableObserverList.Empty;
     private readonly object _initGate = new();
+    private readonly SyncDiagnostics.QueueState _queue;
+    private readonly KeyValuePair<string, object?> _nameTag;
     private Task? _initialization;
 
     /// <summary>
@@ -64,7 +70,7 @@ public sealed class SyncEngine<TDocument>
     /// it past the store's high-water mark, so timestamps are not reused after a restart.
     /// </param>
     /// <param name="conflictHandler">
-    /// The conflict strategy. Defaults to <see cref="ClientWinsConflictHandler{TDocument}"/>.
+    /// The conflict strategy. Defaults to <see cref="DeferConflictHandler{TDocument}"/>: keep conflicts for resolution.
     /// </param>
     /// <param name="options">Optional tuning; sensible defaults are used when omitted.</param>
     /// <exception cref="ArgumentOutOfRangeException">An option is out of range.</exception>
@@ -88,7 +94,7 @@ public sealed class SyncEngine<TDocument>
     /// Returns a deep, independent copy of a document, for example <c>doc =&gt; doc.Clone()</c> or
     /// <see cref="DocumentCloner.Json{T}"/> with source-generated metadata.
     /// </param>
-    /// <param name="conflictHandler">The conflict strategy. Defaults to client-wins.</param>
+    /// <param name="conflictHandler">The conflict strategy. Defaults to <see cref="DeferConflictHandler{TDocument}"/>.</param>
     /// <param name="options">Optional tuning; sensible defaults are used when omitted.</param>
     /// <exception cref="ArgumentOutOfRangeException">An option is out of range.</exception>
     public SyncEngine(
@@ -109,8 +115,10 @@ public sealed class SyncEngine<TDocument>
         _store = store;
         _transport = transport;
         _clock = clock;
-        _conflictHandler = conflictHandler ?? new ClientWinsConflictHandler<TDocument>();
+        _conflictHandler = conflictHandler ?? new DeferConflictHandler<TDocument>();
         _clone = cloner;
+        _nameTag = new KeyValuePair<string, object?>(SyncDiagnostics.NameTag, _options.DiagnosticsName);
+        _queue = SyncDiagnostics.Track(this, _options.DiagnosticsName);
     }
 
     /// <summary>Returns the app-visible documents in the local store.</summary>
@@ -120,6 +128,29 @@ public sealed class SyncEngine<TDocument>
     /// <summary>Returns the stored record (including sync metadata) for <paramref name="id"/>.</summary>
     public Task<SyncRecord<TDocument>?> GetAsync(string id, CancellationToken cancellationToken = default) =>
         _store.GetAsync(id, cancellationToken);
+
+    /// <summary>
+    /// Registers <paramref name="onChange"/> to be called after every committed store transaction made by
+    /// this engine that changed at least one record: one call per transaction, listing the changed ids.
+    /// Dispose the result to stop observing.
+    /// </summary>
+    /// <remarks>
+    /// Callbacks run synchronously on the thread that committed, after the commit, and must be quick;
+    /// UI code should dispatch to its own context. An exception from a callback is passed to
+    /// <paramref name="onError"/> (or ignored) and never affects replication. Changes made by other store
+    /// instances or processes are not observed.
+    /// </remarks>
+    public IDisposable Observe(Action<SyncChange> onChange, Action<Exception>? onError = null)
+    {
+        ArgumentNullException.ThrowIfNull(onChange);
+        var observer = new Observer(onChange, onError);
+        lock (_observerGate)
+        {
+            _observers = _observers.Add(observer);
+        }
+
+        return new Subscription(this, observer);
+    }
 
     /// <summary>Returns the number of documents with local changes not yet confirmed by the server.</summary>
     public Task<int> CountDirtyAsync(CancellationToken cancellationToken = default) =>
@@ -140,10 +171,10 @@ public sealed class SyncEngine<TDocument>
         var copy = _clone(document);
         copy.UpdatedAt = _clock.Now();
 
-        var results = await _store.UpdateAsync(
+        var results = await CommitAsync(SyncChangeKind.Local, 
             [new RecordUpdate<TDocument>(copy.Id, existing => existing is null
                 ? new SyncRecord<TDocument>(copy, null, IsDirty: true) { LocalRevision = 1 }
-                : existing with { Current = copy, IsDirty = true, LocalRevision = existing.LocalRevision + 1, Rejection = null })],
+                : existing with { Current = copy, IsDirty = true, LocalRevision = existing.LocalRevision + 1, Rejection = null, MissingAfterReset = false })],
             cancellationToken: cancellationToken).ConfigureAwait(false);
 
         return new LocalWriteReceipt(copy.Id, results[0].Record!.LocalRevision, copy.UpdatedAt);
@@ -159,7 +190,7 @@ public sealed class SyncEngine<TDocument>
         await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
 
         var stamp = _clock.Now();
-        var results = await _store.UpdateAsync(
+        var results = await CommitAsync(SyncChangeKind.Local, 
             [new RecordUpdate<TDocument>(id, existing =>
             {
                 if (existing is null)
@@ -167,10 +198,10 @@ public sealed class SyncEngine<TDocument>
                     return null;
                 }
 
-                var tombstone = existing.Current;
+                var tombstone = _clone(existing.Current); // transforms are pure: never mutate the stored record
                 tombstone.Deleted = true;
                 tombstone.UpdatedAt = stamp;
-                return existing with { Current = tombstone, IsDirty = true, LocalRevision = existing.LocalRevision + 1, Rejection = null };
+                return existing with { Current = tombstone, IsDirty = true, LocalRevision = existing.LocalRevision + 1, Rejection = null, MissingAfterReset = false };
             })],
             cancellationToken: cancellationToken).ConfigureAwait(false);
 
@@ -179,6 +210,173 @@ public sealed class SyncEngine<TDocument>
             : null;
     }
 
+    /// <summary>Returns up to <paramref name="limit"/> records with an unresolved conflict.</summary>
+    public Task<IReadOnlyList<SyncRecord<TDocument>>> GetConflictsAsync(int limit = 100, CancellationToken cancellationToken = default) =>
+        _store.GetConflictsAsync(limit, cancellationToken);
+
+    /// <summary>
+    /// Resolves a kept conflict with <paramref name="resolved"/>, which becomes a new local edit based on the latest
+    /// server state the replica knows. Returns <see langword="null"/> if the document has no unresolved conflict.
+    /// </summary>
+    public async Task<LocalWriteReceipt?> ResolveConflictAsync(string id, TDocument resolved, CancellationToken cancellationToken = default)
+    {
+        SyncIds.Validate(id);
+        ArgumentNullException.ThrowIfNull(resolved);
+        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
+        var copy = _clone(resolved);
+        copy.Id = id;
+        copy.UpdatedAt = _clock.Now();
+        var results = await CommitAsync(
+            SyncChangeKind.Local,
+            [new RecordUpdate<TDocument>(id, existing => existing?.Conflict is null
+                ? null
+                : existing with { Current = copy, IsDirty = true, LocalRevision = existing.LocalRevision + 1, Rejection = null, Conflict = null, MissingAfterReset = false })],
+            cancellationToken: cancellationToken).ConfigureAwait(false);
+        return results[0] is { Changed: true, Record: { } record } ? new LocalWriteReceipt(id, record.LocalRevision, copy.UpdatedAt) : null;
+    }
+
+    /// <summary>Discards a kept conflict: the local change is dropped and the server state stays. Returns whether one existed.</summary>
+    public async Task<bool> DiscardConflictAsync(string id, CancellationToken cancellationToken = default)
+    {
+        SyncIds.Validate(id);
+        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
+        var results = await CommitAsync(
+            SyncChangeKind.Local,
+            [new RecordUpdate<TDocument>(id, existing => existing?.Conflict is null ? null : existing with { Conflict = null })],
+            cancellationToken: cancellationToken).ConfigureAwait(false);
+        return results[0].Changed;
+    }
+
+    /// <summary>Returns up to <paramref name="limit"/> records whose latest local change the server rejected.</summary>
+    public Task<IReadOnlyList<SyncRecord<TDocument>>> GetRejectedAsync(int limit = 100, CancellationToken cancellationToken = default) =>
+        _store.GetRejectedAsync(limit, cancellationToken);
+
+    /// <summary>
+    /// Sends a rejected change again, as a new operation with a fresh timestamp (for example after the server's rules
+    /// or the device clock were fixed). Returns <see langword="null"/> if the record is not rejected.
+    /// </summary>
+    public async Task<LocalWriteReceipt?> RetryRejectedAsync(string id, CancellationToken cancellationToken = default)
+    {
+        SyncIds.Validate(id);
+        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
+        var stamp = _clock.Now();
+        var results = await CommitAsync(
+            SyncChangeKind.Local,
+            [new RecordUpdate<TDocument>(id, existing =>
+            {
+                if (existing?.Rejection is null)
+                {
+                    return null;
+                }
+
+                var copy = _clone(existing.Current);
+                copy.UpdatedAt = stamp;
+                return existing with { Current = copy, IsDirty = true, LocalRevision = existing.LocalRevision + 1, Pending = null, Rejection = null };
+            })],
+            cancellationToken: cancellationToken).ConfigureAwait(false);
+        return results[0] is { Changed: true, Record: { } record } ? new LocalWriteReceipt(id, record.LocalRevision, stamp) : null;
+    }
+
+    /// <summary>
+    /// Discards the unsynchronized local change of one document (pending or rejected) and returns it to the newest
+    /// server state the replica knows. A document the server has never confirmed is hidden like a missing record
+    /// until a pull brings it. Returns whether there was a change to discard.
+    /// </summary>
+    /// <remarks>
+    /// An operation already sent cannot be recalled: if the server accepted it before the revert, the next pull shows
+    /// that state. A kept conflict is not affected; see <see cref="DiscardConflictAsync"/>.
+    /// </remarks>
+    public async Task<bool> RevertAsync(string id, CancellationToken cancellationToken = default)
+    {
+        SyncIds.Validate(id);
+        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
+        var results = await CommitAsync(
+            SyncChangeKind.Local,
+            [new RecordUpdate<TDocument>(id, existing =>
+            {
+                if (existing is not { IsDirty: true })
+                {
+                    return null;
+                }
+
+                var clean = existing with { IsDirty = false, LocalRevision = existing.LocalRevision + 1, Pending = null, Rejection = null, Observed = null, ObservedVersion = null };
+                if (existing.ObservedVersion is { } observed && existing.Observed is { } newer && (existing.BaseVersion is not { } baseVersion || observed > baseVersion))
+                {
+                    return clean with { Current = _clone(newer), Base = _clone(newer), BaseVersion = observed, MissingAfterReset = false };
+                }
+
+                return existing.Base is { } confirmed
+                    ? clean with { Current = _clone(confirmed), MissingAfterReset = false }
+                    : clean with { MissingAfterReset = true };
+            })],
+            cancellationToken: cancellationToken).ConfigureAwait(false);
+        return results[0].Changed;
+    }
+
+    /// <summary>
+    /// Returns every record that holds local work: unsynchronized changes (pending or rejected) and kept conflicts,
+    /// with their pending operations. Use it to move work to a rebuilt or new store with
+    /// <see cref="ImportLocalChangesAsync"/>, or to show it to support. Not bounded: it reads all such records.
+    /// </summary>
+    public async Task<IReadOnlyList<SyncRecord<TDocument>>> ExportLocalChangesAsync(CancellationToken cancellationToken = default)
+    {
+        var byId = new Dictionary<string, SyncRecord<TDocument>>(StringComparer.Ordinal);
+        foreach (var record in (await _store.GetPendingAsync(int.MaxValue, cancellationToken: cancellationToken).ConfigureAwait(false))
+            .Concat(await _store.GetRejectedAsync(int.MaxValue, cancellationToken).ConfigureAwait(false))
+            .Concat(await _store.GetConflictsAsync(int.MaxValue, cancellationToken).ConfigureAwait(false)))
+        {
+            byId[record.Current.Id] = record;
+        }
+
+        return [.. byId.Values.OrderBy(static r => r.Current.Id, StringComparer.Ordinal)];
+    }
+
+    /// <summary>
+    /// Adds exported local work to this replica. A record is imported only where this replica has no local work of
+    /// its own for the id (absent, or clean without a conflict); pending operations keep their ids, so a resend is
+    /// replayed by the server rather than applied twice. Returns the ids that were skipped.
+    /// </summary>
+    public async Task<IReadOnlyList<string>> ImportLocalChangesAsync(IReadOnlyList<SyncRecord<TDocument>> records, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(records);
+        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
+        var generation = (await _store.GetCursorAsync(cancellationToken).ConfigureAwait(false)).Generation;
+        var skipped = new List<string>();
+        foreach (var batch in records.Chunk(_options.PushBatchSize))
+        {
+            var results = await CommitAsync(
+                SyncChangeKind.Local,
+                [.. batch.Select(record => new RecordUpdate<TDocument>(record.Current.Id, existing =>
+                    existing is null or { IsDirty: false, Conflict: null }
+                        ? CloneRecord(record) with { Generation = Math.Min(record.Generation, generation), MissingAfterReset = false }
+                        : null))],
+                cancellationToken: cancellationToken).ConfigureAwait(false);
+            skipped.AddRange(results.Select((r, i) => (r.Changed, batch[i].Current.Id)).Where(static r => !r.Changed).Select(static r => r.Id));
+        }
+
+        foreach (var record in records)
+        {
+            _clock.Update(record.Current.UpdatedAt);
+            if (record.Pending is { } pending)
+            {
+                _clock.Update(pending.Payload.UpdatedAt);
+            }
+        }
+
+        return skipped;
+    }
+
+    private SyncRecord<TDocument> CloneRecord(SyncRecord<TDocument> record) => record with
+    {
+        Current = _clone(record.Current),
+        Base = record.Base is { } confirmed ? _clone(confirmed) : null,
+        Observed = record.Observed is { } observed ? _clone(observed) : null,
+        Pending = record.Pending is { } pending ? pending with { Payload = _clone(pending.Payload) } : null,
+        Conflict = record.Conflict is { } conflict
+            ? conflict with { Server = _clone(conflict.Server), Local = _clone(conflict.Local), Base = conflict.Base is { } ancestor ? _clone(ancestor) : null }
+            : null,
+    };
+
     /// <summary>Runs a full sync: pull server changes, then push local writes.</summary>
     public async Task<SyncResult> SyncAsync(CancellationToken cancellationToken = default)
     {
@@ -186,9 +384,12 @@ public sealed class SyncEngine<TDocument>
         await _replicationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var pull = await PullCoreAsync(cancellationToken).ConfigureAwait(false);
-            var push = await PushCoreAsync(cancellationToken).ConfigureAwait(false);
-            return pull + push;
+            return await RunAsync("sync", async () =>
+            {
+                var pull = await PullCoreAsync(cancellationToken).ConfigureAwait(false);
+                var push = await PushCoreAsync(cancellationToken).ConfigureAwait(false);
+                return pull + push;
+            }).ConfigureAwait(false);
         }
         finally
         {
@@ -201,13 +402,20 @@ public sealed class SyncEngine<TDocument>
     /// checkpoint, in one atomic store update. Records with unconfirmed local changes are left untouched
     /// so their divergence is resolved during push.
     /// </summary>
+    /// <remarks>
+    /// When the server can no longer serve the stored checkpoint (<see cref="SyncResetRequiredException"/>),
+    /// the engine starts a new generation and pulls a full snapshot. Pending local changes and their
+    /// operations are kept. Clean records the snapshot does not contain are marked
+    /// <see cref="SyncRecord{TDocument}.MissingAfterReset"/> and hidden from queries; they are not deleted
+    /// on the server.
+    /// </remarks>
     public async Task<SyncResult> PullAsync(CancellationToken cancellationToken = default)
     {
         await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
         await _replicationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            return await PullCoreAsync(cancellationToken).ConfigureAwait(false);
+            return await RunAsync("pull", () => PullCoreAsync(cancellationToken)).ConfigureAwait(false);
         }
         finally
         {
@@ -226,13 +434,96 @@ public sealed class SyncEngine<TDocument>
         await _replicationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            return await PushCoreAsync(cancellationToken).ConfigureAwait(false);
+            return await RunAsync("push", () => PushCoreAsync(cancellationToken)).ConfigureAwait(false);
         }
         finally
         {
             _replicationGate.Release();
         }
     }
+
+    /// <summary>Runs one replication operation inside a trace span, and records its duration and the queue afterwards.</summary>
+    private async Task<SyncResult> RunAsync(string operation, Func<Task<SyncResult>> run)
+    {
+        using var activity = SyncDiagnostics.ActivitySource.StartActivity($"blazorsync.{operation}");
+        activity?.SetTag(SyncDiagnostics.NameTag, _options.DiagnosticsName);
+        var started = Stopwatch.GetTimestamp();
+        var result = "error";
+        string? errorType = null;
+        try
+        {
+            var outcome = await run().ConfigureAwait(false);
+            result = outcome.IsComplete ? "complete" : "incomplete";
+            if (activity is not null)
+            {
+                activity.SetTag("blazorsync.pulled", outcome.Pulled);
+                activity.SetTag("blazorsync.pushed", outcome.Pushed);
+                activity.SetTag("blazorsync.conflicts", outcome.Conflicts);
+                activity.SetTag("blazorsync.rejected", outcome.Rejected);
+                activity.SetTag("blazorsync.deferred", outcome.Deferred);
+                activity.SetTag("blazorsync.reset", outcome.ResetPerformed);
+                activity.SetTag("blazorsync.result", result);
+            }
+
+            return outcome;
+        }
+        catch (Exception error)
+        {
+            errorType = error switch
+            {
+                SyncTransportException transport => transport.ErrorCode,
+                OperationCanceledException => "cancelled",
+                _ => error.GetType().Name,
+            };
+            activity?.SetStatus(ActivityStatusCode.Error, errorType);
+            activity?.SetTag("error.type", errorType);
+            throw;
+        }
+        finally
+        {
+            if (SyncDiagnostics.RunDuration.Enabled)
+            {
+                var tags = new TagList { _nameTag, { "blazorsync.operation", operation }, { "blazorsync.result", result } };
+                if (errorType is not null)
+                {
+                    tags.Add("error.type", errorType);
+                }
+
+                SyncDiagnostics.RunDuration.Record(Stopwatch.GetElapsedTime(started).TotalSeconds, tags);
+            }
+
+            await MeasureQueueAsync().ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Refreshes the queue gauges, only while someone listens to them.</summary>
+    private async Task MeasureQueueAsync()
+    {
+        if (!SyncDiagnostics.QueueDepth.Enabled && !SyncDiagnostics.QueueOldestAge.Enabled)
+        {
+            return;
+        }
+
+        try
+        {
+            var depth = await _store.CountDirtyAsync(CancellationToken.None).ConfigureAwait(false);
+            var oldest = await _store.GetPendingAsync(1, cancellationToken: CancellationToken.None).ConfigureAwait(false);
+            _queue.Update(depth, oldest.Count == 0 ? null : oldest[0].Current.UpdatedAt.WallTime);
+        }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        {
+            // Diagnostics must never change the outcome of a run (the store may be closing, for example).
+        }
+    }
+
+    private static string OutcomeName(PushOutcomeKind kind) => kind switch
+    {
+        PushOutcomeKind.Accepted => "accepted",
+        PushOutcomeKind.Conflict => "conflict",
+        PushOutcomeKind.Rejected => "rejected",
+        PushOutcomeKind.RetryLater => "retry-later",
+        _ => "unknown",
+    };
 
     private Task EnsureInitializedAsync(CancellationToken cancellationToken)
     {
@@ -260,36 +551,106 @@ public sealed class SyncEngine<TDocument>
     private async Task<SyncResult> PullCoreAsync(CancellationToken cancellationToken)
     {
         var applied = 0;
-        var checkpoint = await _store.GetCheckpointAsync(cancellationToken).ConfigureAwait(false);
+        var reset = false;
+        var cursor = await _store.GetCursorAsync(cancellationToken).ConfigureAwait(false);
 
         for (var page = 0; page < _options.MaxPullPages; page++)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var result = await _transport
-                .PullAsync(new PullRequest(checkpoint, _options.PullBatchSize), cancellationToken)
-                .ConfigureAwait(false);
-            ValidatePullPage(result, checkpoint);
+            PullResult<TDocument> result;
+            try
+            {
+                result = await _transport
+                    .PullAsync(new PullRequest(cursor.Checkpoint, _options.PullBatchSize), cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (SyncResetRequiredException required) when (!cursor.Checkpoint.IsStart)
+            {
+                // Start a new generation and a full snapshot, atomically. Local records are untouched. After a change
+                // of access or retention, records the snapshot lacks are removed rather than kept hidden.
+                cursor = new ReplicaCursor(Checkpoint.Start, cursor.Generation + 1, Resnapshot: true, PurgeMissing: required.Reason is ResetReasons.ScopeChanged or ResetReasons.Expired);
+                await CommitAsync(SyncChangeKind.Remote, [], cursor, cancellationToken).ConfigureAwait(false);
+                reset = true;
+                SyncDiagnostics.Resets.Add(1, _nameTag, new KeyValuePair<string, object?>("blazorsync.reason", required.Reason));
+                Activity.Current?.AddEvent(new ActivityEvent("blazorsync.reset", tags: new ActivityTagsCollection { ["blazorsync.reason"] = required.Reason }));
+                continue;
+            }
 
+            ValidatePullPage(result, cursor.Checkpoint);
+
+            var generation = cursor.Generation;
             var updates = new List<RecordUpdate<TDocument>>(result.Changes.Count);
             foreach (var change in result.Changes)
             {
                 // Keep the local clock ahead of every timestamp observed from other replicas.
                 _clock.Update(change.Document.UpdatedAt);
-                updates.Add(new RecordUpdate<TDocument>(change.Document.Id, existing => ApplyRemote(existing, change)));
+                updates.Add(new RecordUpdate<TDocument>(change.Document.Id, existing => ApplyRemote(existing, change, generation)));
             }
 
-            var results = await _store.UpdateAsync(updates, result.Checkpoint, cancellationToken).ConfigureAwait(false);
-            applied += results.Count(static r => r.Changed);
-            checkpoint = result.Checkpoint;
+            var next = cursor with { Checkpoint = result.Checkpoint };
+            var results = await CommitAsync(SyncChangeKind.Remote, updates, next, cancellationToken).ConfigureAwait(false);
+            var changed = results.Count(static r => r.Changed);
+            applied += changed;
+            SyncDiagnostics.PulledChanges.Add(changed, _nameTag);
+            cursor = next;
 
             if (!result.HasMore)
             {
-                return new SyncResult(applied, 0, 0);
+                var swept = cursor.Resnapshot
+                    ? await CompleteResnapshotAsync(cursor, cancellationToken).ConfigureAwait(false)
+                    : default;
+                return new SyncResult(applied, 0, 0)
+                {
+                    ResetPerformed = reset,
+                    MissingAfterReset = swept.Hidden,
+                    PurgedAfterReset = swept.Purged,
+                };
             }
         }
 
-        return new SyncResult(applied, 0, 0) { HasRemainingWork = true };
+        return new SyncResult(applied, 0, 0) { HasRemainingWork = true, ResetPerformed = reset };
+    }
+
+    /// <summary>
+    /// Marks clean records that the completed snapshot did not contain as missing (or purges them), in bounded
+    /// batches, then leaves resnapshot mode. Safe to repeat after a crash: the cursor stays in resnapshot mode
+    /// until every stale record is handled.
+    /// </summary>
+    private async Task<(int Hidden, int Purged)> CompleteResnapshotAsync(ReplicaCursor cursor, CancellationToken cancellationToken)
+    {
+        var hidden = 0;
+        var purged = 0;
+        var generation = cursor.Generation;
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var stale = await _store.GetStaleAsync(generation, _options.PullBatchSize, cancellationToken).ConfigureAwait(false);
+            if (stale.Count == 0)
+            {
+                await CommitAsync(SyncChangeKind.Remote, [], cursor with { Resnapshot = false, PurgeMissing = false }, cancellationToken).ConfigureAwait(false);
+                return (hidden, purged);
+            }
+
+            if (cursor.PurgeMissing)
+            {
+                var ids = stale.Select(static r => r.Current.Id).ToList();
+                purged += await _store.PurgeAsync(ids, generation, cancellationToken).ConfigureAwait(false);
+                Notify(new SyncChange(SyncChangeKind.Remote, ids));
+
+                // A record that keeps an unresolved conflict still holds a local change, so it is not purged; it is
+                // hidden like after an epoch reset (the conflict stays listed). The loop below handles it.
+            }
+
+            var updates = stale
+                .Select(record => new RecordUpdate<TDocument>(record.Current.Id, existing =>
+                    existing is { IsDirty: false, MissingAfterReset: false } && existing.Generation < generation
+                        ? existing with { MissingAfterReset = true, Generation = generation }
+                        : null))
+                .ToList();
+            var results = await CommitAsync(SyncChangeKind.Remote, updates, cancellationToken: cancellationToken).ConfigureAwait(false);
+            hidden += results.Count(static r => r.Changed);
+        }
     }
 
     private void ValidatePullPage(PullResult<TDocument>? result, Checkpoint requested)
@@ -324,18 +685,21 @@ public sealed class SyncEngine<TDocument>
         }
     }
 
-    private SyncRecord<TDocument>? ApplyRemote(SyncRecord<TDocument>? existing, RemoteChange<TDocument> change)
+    private SyncRecord<TDocument>? ApplyRemote(SyncRecord<TDocument>? existing, RemoteChange<TDocument> change, long generation)
     {
         if (existing is null)
         {
             return new SyncRecord<TDocument>(_clone(change.Document), _clone(change.Document), IsDirty: false)
             {
                 BaseVersion = change.Version,
+                Generation = generation,
             };
         }
 
-        // Never regress to an older or equal server version (duplicate or reordered delivery).
-        if (existing.KnownVersion is { } known && known >= change.Version)
+        // Never regress to an older or equal server version (duplicate or reordered delivery). Versions
+        // from an earlier generation are not compared: after a restore the server may legitimately serve
+        // an older state than the replica last saw.
+        if (existing.Generation == generation && existing.KnownVersion is { } known && known >= change.Version)
         {
             return null;
         }
@@ -345,7 +709,7 @@ public sealed class SyncEngine<TDocument>
         // moves past it.
         if (existing.IsDirty)
         {
-            return existing with { Observed = _clone(change.Document), ObservedVersion = change.Version };
+            return existing with { Observed = _clone(change.Document), ObservedVersion = change.Version, Generation = generation };
         }
 
         return existing with
@@ -355,6 +719,8 @@ public sealed class SyncEngine<TDocument>
             BaseVersion = change.Version,
             Observed = null,
             ObservedVersion = null,
+            Generation = generation,
+            MissingAfterReset = false,
         };
     }
 
@@ -392,6 +758,7 @@ public sealed class SyncEngine<TDocument>
         var conflicts = 0;
         var rejected = 0;
         var deferred = 0;
+        var generation = (await _store.GetCursorAsync(cancellationToken).ConfigureAwait(false)).Generation;
         var excluded = new HashSet<string>(StringComparer.Ordinal);
         var conflictCounts = new Dictionary<string, int>(StringComparer.Ordinal);
 
@@ -415,6 +782,28 @@ public sealed class SyncEngine<TDocument>
                 .PushAsync(new PushRequest<TDocument>(operations), cancellationToken)
                 .ConfigureAwait(false);
             var outcomes = CorrelateOutcomes(operations, response);
+            if (SyncDiagnostics.Operations.Enabled)
+            {
+                foreach (var operation in operations)
+                {
+                    var tags = new TagList { _nameTag };
+                    if (outcomes.TryGetValue(operation.OperationId, out var outcome))
+                    {
+                        tags.Add("blazorsync.outcome", OutcomeName(outcome.Kind));
+                        tags.Add("blazorsync.duplicate", outcome.IsDuplicate);
+                        if (outcome.Kind == PushOutcomeKind.Rejected)
+                        {
+                            tags.Add("error.type", outcome.ErrorCode ?? "rejected");
+                        }
+                    }
+                    else
+                    {
+                        tags.Add("blazorsync.outcome", "missing");
+                    }
+
+                    SyncDiagnostics.Operations.Add(1, tags);
+                }
+            }
 
             var acknowledgements = new List<RecordUpdate<TDocument>>();
             foreach (var operation in operations)
@@ -433,7 +822,7 @@ public sealed class SyncEngine<TDocument>
                         _clock.Update(outcome.Document!.UpdatedAt);
                         acknowledgements.Add(new RecordUpdate<TDocument>(
                             operation.DocumentId,
-                            existing => ApplyAccepted(existing, operation.OperationId, outcome)));
+                            existing => ApplyAccepted(existing, operation.OperationId, outcome, generation)));
                         pushed++;
                         break;
 
@@ -452,7 +841,7 @@ public sealed class SyncEngine<TDocument>
                 }
             }
 
-            await _store.UpdateAsync(acknowledgements, cancellationToken: cancellationToken).ConfigureAwait(false);
+            await CommitAsync(SyncChangeKind.Sync, acknowledgements, cancellationToken: cancellationToken).ConfigureAwait(false);
 
             foreach (var operation in operations)
             {
@@ -460,7 +849,7 @@ public sealed class SyncEngine<TDocument>
                 {
                     conflicts++;
                     var count = conflictCounts[operation.DocumentId] = conflictCounts.GetValueOrDefault(operation.DocumentId) + 1;
-                    var stillPending = await ResolveConflictAsync(operation.OperationId, outcome, cancellationToken).ConfigureAwait(false);
+                    var stillPending = await ResolveConflictAsync(operation.OperationId, outcome, generation, cancellationToken).ConfigureAwait(false);
                     if (stillPending && count >= _options.MaxConflictRetries)
                     {
                         excluded.Add(operation.DocumentId);
@@ -500,7 +889,7 @@ public sealed class SyncEngine<TDocument>
                     : null));
         }
 
-        var results = await _store.UpdateAsync(updates, cancellationToken: cancellationToken).ConfigureAwait(false);
+        var results = await CommitAsync(SyncChangeKind.Sync, updates, cancellationToken: cancellationToken).ConfigureAwait(false);
         var operations = new List<PushOperation<TDocument>>(results.Count);
         foreach (var result in results)
         {
@@ -554,7 +943,7 @@ public sealed class SyncEngine<TDocument>
         return outcomes;
     }
 
-    private SyncRecord<TDocument>? ApplyAccepted(SyncRecord<TDocument>? existing, string operationId, PushOutcome<TDocument> outcome)
+    private SyncRecord<TDocument>? ApplyAccepted(SyncRecord<TDocument>? existing, string operationId, PushOutcome<TDocument> outcome, long generation)
     {
         // A stale or duplicate response for an operation that is no longer pending changes nothing.
         if (existing?.Pending is not { } pending || pending.OperationId != operationId)
@@ -563,7 +952,7 @@ public sealed class SyncEngine<TDocument>
         }
 
         var confirmed = outcome.Document!;
-        var rebased = existing with { Base = _clone(confirmed), BaseVersion = outcome.Version, Pending = null };
+        var rebased = existing with { Base = _clone(confirmed), BaseVersion = outcome.Version, Pending = null, Generation = generation };
 
         // Only the revision that was sent becomes clean; a later local edit stays dirty on the new base.
         return Settle(existing.LocalRevision == pending.Revision
@@ -578,13 +967,18 @@ public sealed class SyncEngine<TDocument>
             return null;
         }
 
-        return existing.LocalRevision == pending.Revision
-            ? existing with { Pending = null, Rejection = new SyncRejection(pending.Revision, outcome.ErrorCode ?? "rejected", outcome.Message) }
+        // The server no longer knows the base: the next local edit is sent as a new document (an explicit choice
+        // to recreate it), never silently.
+        var forgotten = outcome.ErrorCode == PushErrorCodes.BaseExpired
+            ? existing with { Pending = null, Base = null, BaseVersion = null, Observed = null, ObservedVersion = null }
             : existing with { Pending = null };
+        return existing.LocalRevision == pending.Revision
+            ? forgotten with { Rejection = new SyncRejection(pending.Revision, outcome.ErrorCode ?? "rejected", outcome.Message) }
+            : forgotten;
     }
 
     /// <summary>Runs the conflict handler and commits its decision; returns whether the record is still pushable.</summary>
-    private async Task<bool> ResolveConflictAsync(string operationId, PushOutcome<TDocument> outcome, CancellationToken cancellationToken)
+    private async Task<bool> ResolveConflictAsync(string operationId, PushOutcome<TDocument> outcome, long generation, CancellationToken cancellationToken)
     {
         var master = outcome.Document!;
         var masterVersion = outcome.Version!.Value;
@@ -601,6 +995,15 @@ public sealed class SyncEngine<TDocument>
             AssumedMaster: snapshot.Base is { } b ? _clone(b) : null,
             Fork: _clone(snapshot.Current)));
 
+        SyncDiagnostics.ConflictDecisions.Add(1, _nameTag, new KeyValuePair<string, object?>("blazorsync.decision", resolution.Outcome switch
+        {
+            ConflictOutcome.UseMaster => "use-master",
+            ConflictOutcome.UseResolved => "use-resolved",
+            ConflictOutcome.KeepFork => "keep-fork",
+            ConflictOutcome.Defer => "defer",
+            _ => "unknown",
+        }));
+
         TDocument? resolved = null;
         if (resolution.Outcome == ConflictOutcome.UseResolved)
         {
@@ -609,7 +1012,7 @@ public sealed class SyncEngine<TDocument>
             resolved.UpdatedAt = _clock.Update(master.UpdatedAt);
         }
 
-        var results = await _store.UpdateAsync(
+        var results = await CommitAsync(SyncChangeKind.Sync, 
             [new RecordUpdate<TDocument>(master.Id, existing =>
             {
                 if (existing?.Pending?.OperationId != operationId)
@@ -624,11 +1027,18 @@ public sealed class SyncEngine<TDocument>
                     return existing with { Pending = null };
                 }
 
-                var rebased = existing with { Base = _clone(master), BaseVersion = masterVersion, Pending = null };
+                var rebased = existing with { Base = _clone(master), BaseVersion = masterVersion, Pending = null, Generation = generation };
                 return Settle(resolution.Outcome switch
                 {
                     ConflictOutcome.UseMaster => rebased with { Current = _clone(master), IsDirty = false, Rejection = null },
                     ConflictOutcome.KeepFork => rebased with { IsDirty = true },
+                    ConflictOutcome.Defer => rebased with
+                    {
+                        Current = _clone(master),
+                        IsDirty = false,
+                        Rejection = null,
+                        Conflict = new SyncConflict<TDocument>(_clone(master), masterVersion, _clone(existing.Current), existing.Base is { } ancestor ? _clone(ancestor) : null),
+                    },
                     _ => rebased with { Current = _clone(resolved!), IsDirty = true, LocalRevision = existing.LocalRevision + 1 },
                 });
             })],
@@ -636,4 +1046,104 @@ public sealed class SyncEngine<TDocument>
 
         return results[0].Record?.IsPushable ?? false;
     }
+
+    private async Task<IReadOnlyList<RecordUpdateResult<TDocument>>> CommitAsync(
+        SyncChangeKind kind,
+        IReadOnlyList<RecordUpdate<TDocument>> updates,
+        ReplicaCursor? cursor = null,
+        CancellationToken cancellationToken = default)
+    {
+        var results = await _store.UpdateAsync(updates, cursor, cancellationToken).ConfigureAwait(false);
+        List<string>? changed = null;
+        for (var i = 0; i < results.Count; i++)
+        {
+            if (results[i].Changed)
+            {
+                (changed ??= []).Add(updates[i].Id);
+            }
+        }
+
+        if (changed is not null)
+        {
+            Notify(new SyncChange(kind, changed));
+        }
+
+        return results;
+    }
+
+    private void Notify(SyncChange change)
+    {
+        ImmutableObserverList observers;
+        lock (_observerGate)
+        {
+            observers = _observers;
+        }
+
+        foreach (var observer in observers.Items)
+        {
+            try
+            {
+                observer.OnChange(change);
+            }
+            catch (Exception error)
+            {
+                try
+                {
+                    observer.OnError?.Invoke(error);
+                }
+                catch
+                {
+                    // An observer's error handler must not affect replication either.
+                }
+            }
+        }
+    }
+
+    private sealed record Observer(Action<SyncChange> OnChange, Action<Exception>? OnError);
+
+    /// <summary>Copy-on-write list so notifications never hold the lock while calling observers.</summary>
+    private sealed class ImmutableObserverList(Observer[] items)
+    {
+        public static readonly ImmutableObserverList Empty = new([]);
+
+        public Observer[] Items { get; } = items;
+
+        public ImmutableObserverList Add(Observer observer) => new([.. Items, observer]);
+
+        public ImmutableObserverList Remove(Observer observer) => new(Items.Where(o => !ReferenceEquals(o, observer)).ToArray());
+    }
+
+    private sealed class Subscription(SyncEngine<TDocument> engine, Observer observer) : IDisposable
+    {
+        private int _disposed;
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) == 0)
+            {
+                lock (engine._observerGate)
+                {
+                    engine._observers = engine._observers.Remove(observer);
+                }
+            }
+        }
+    }
 }
+
+/// <summary>What caused a <see cref="SyncChange"/>.</summary>
+public enum SyncChangeKind
+{
+    /// <summary>A local write or delete through the engine.</summary>
+    Local = 0,
+
+    /// <summary>State received from the server by pull, or records marked missing after a reset.</summary>
+    Remote = 1,
+
+    /// <summary>Replication metadata: operations prepared, acknowledged, rejected or resolved after a conflict.</summary>
+    Sync = 2,
+}
+
+/// <summary>One committed store transaction that changed records.</summary>
+/// <param name="Kind">What caused the change.</param>
+/// <param name="Ids">The ids of the records that changed, in commit order.</param>
+public sealed record SyncChange(SyncChangeKind Kind, IReadOnlyList<string> Ids);

@@ -1,6 +1,6 @@
 # ADR-010: Authentication and scope identity
 
-- **Status:** Proposed; implementation in Phases 4, 6 and 8 (2026-09-27)
+- **Status:** Accepted; implemented for the reference authority (2026-09-28)
 - **Invariants:** I07, I10, I14, I18
 
 ## Decision
@@ -22,3 +22,18 @@
 - Browser clients use cookie authentication with CSRF protection or bearer tokens with renewal; no
   database credentials or client secrets are ever shipped to WebAssembly. Logs redact tokens and document
   bodies by default.
+
+## Implementation status (2026-09-28)
+
+- Scope from authenticated claims (`SyncEndpointOptions.ResolveScope`, `SyncCallContext`), isolated
+  per-scope authorities (`ScopedAuthority`), per-document `CanRead`/`CanWrite`, filtered conflict and replay
+  responses: implemented and tested (HTTP and in-process).
+- The scope fingerprint is `InMemorySyncServerOptions.ScopeFingerprint(context)`; its hash is part of every
+  checkpoint. A different fingerprint yields `reset-required` with reason `scope-changed`; the replica
+  resnapshots and removes documents no longer visible (never records with local changes or kept conflicts).
+  Revocation and regrant are tested (`SelectiveSyncTests`).
+- Receipts are per scope (each scope has its own authority); receipts are not yet bound to a fingerprint
+  inside one scope.
+- Replica id and incarnation: SQLite and IndexedDB stores (Phases 3 and 5). Account switching stops the
+  session and abandons in-flight work (Phase 7). Encryption at rest and token/cookie guidance with a real
+  identity provider: not done.

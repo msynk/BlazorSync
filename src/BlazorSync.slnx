@@ -1,11 +1,26 @@
 <Solution>
   <Folder Name="/samples/">
     <Project Path="BlazorSync.Demo/BlazorSync.Demo.csproj" />
+    <Project Path="BlazorSync.Samples.Notes.Client/BlazorSync.Samples.Notes.Client.csproj" />
+    <Project Path="BlazorSync.Samples.Notes.Server/BlazorSync.Samples.Notes.Server.csproj" />
+    <Project Path="BlazorSync.Samples.Shared/BlazorSync.Samples.Shared.csproj" />
+    <Project Path="BlazorSync.Samples.WebApp.Client/BlazorSync.Samples.WebApp.Client.csproj" />
+    <Project Path="BlazorSync.Samples.WebApp/BlazorSync.Samples.WebApp.csproj" />
   </Folder>
   <Folder Name="/src/">
+    <Project Path="BlazorSync.Blazor/BlazorSync.Blazor.csproj" />
+    <Project Path="BlazorSync.Server.AspNetCore/BlazorSync.Server.AspNetCore.csproj" />
+    <Project Path="BlazorSync.Storage.IndexedDb/BlazorSync.Storage.IndexedDb.csproj" />
+    <Project Path="BlazorSync.Storage.Sqlite/BlazorSync.Storage.Sqlite.csproj" />
+    <Project Path="BlazorSync.Testing/BlazorSync.Testing.csproj" />
+    <Project Path="BlazorSync.Transport.Http/BlazorSync.Transport.Http.csproj" />
     <Project Path="BlazorSync/BlazorSync.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="BlazorSync.Benchmarks/BlazorSync.Benchmarks.csproj" />
+    <Project Path="BlazorSync.Tests.Browser/BlazorSync.Tests.Browser.csproj" />
+    <Project Path="BlazorSync.Tests.BrowserHost/BlazorSync.Tests.BrowserHost.csproj" />
+    <Project Path="BlazorSync.Tests.CrashHost/BlazorSync.Tests.CrashHost.csproj" />
     <Project Path="BlazorSync.Tests/BlazorSync.Tests.csproj" />
   </Folder>
 </Solution>

@@ -1,0 +1,9 @@
+@page "/"
+
+<PageTitle>BlazorSync render modes</PageTitle>
+<h1>One notes component, every render mode</h1>
+<p>
+    Each page shows the same data through <code>ISyncCollection&lt;Note&gt;</code>. On the server (static SSR,
+    Interactive Server, prerendering) it reads and writes the authority directly; in WebAssembly it uses a local
+    IndexedDB replica that works offline and syncs over HTTP.
+</p>

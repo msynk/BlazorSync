@@ -20,21 +20,21 @@ public sealed class InterceptingStore<T>(ILocalStore<T> inner) : ILocalStore<T>
 
     public int UpdateCalls { get; private set; }
 
-    /// <summary>Receives the 1-based call number, the updates and the checkpoint.</summary>
-    public Func<int, IReadOnlyList<RecordUpdate<T>>, Checkpoint?, Task>? BeforeUpdate { get; set; }
+    /// <summary>Receives the 1-based call number, the updates and the cursor.</summary>
+    public Func<int, IReadOnlyList<RecordUpdate<T>>, ReplicaCursor?, Task>? BeforeUpdate { get; set; }
 
     public async Task<IReadOnlyList<RecordUpdateResult<T>>> UpdateAsync(
         IReadOnlyList<RecordUpdate<T>> updates,
-        Checkpoint? checkpoint = null,
+        ReplicaCursor? cursor = null,
         CancellationToken cancellationToken = default)
     {
         var call = ++UpdateCalls;
         if (BeforeUpdate is { } hook)
         {
-            await hook(call, updates, checkpoint);
+            await hook(call, updates, cursor);
         }
 
-        return await Inner.UpdateAsync(updates, checkpoint, cancellationToken);
+        return await Inner.UpdateAsync(updates, cursor, cancellationToken);
     }
 
     public Task<SyncRecord<T>?> GetAsync(string id, CancellationToken cancellationToken = default) => Inner.GetAsync(id, cancellationToken);
@@ -47,7 +47,19 @@ public sealed class InterceptingStore<T>(ILocalStore<T> inner) : ILocalStore<T>
     public Task<IReadOnlyList<T>> QueryAsync(bool includeDeleted = false, CancellationToken cancellationToken = default) =>
         Inner.QueryAsync(includeDeleted, cancellationToken);
 
-    public Task<Checkpoint> GetCheckpointAsync(CancellationToken cancellationToken = default) => Inner.GetCheckpointAsync(cancellationToken);
+    public Task<ReplicaCursor> GetCursorAsync(CancellationToken cancellationToken = default) => Inner.GetCursorAsync(cancellationToken);
+
+    public Task<IReadOnlyList<SyncRecord<T>>> GetStaleAsync(long generation, int limit, CancellationToken cancellationToken = default) =>
+        Inner.GetStaleAsync(generation, limit, cancellationToken);
+
+    public Task<IReadOnlyList<SyncRecord<T>>> GetConflictsAsync(int limit, CancellationToken cancellationToken = default) =>
+        Inner.GetConflictsAsync(limit, cancellationToken);
+
+    public Task<IReadOnlyList<SyncRecord<T>>> GetRejectedAsync(int limit, CancellationToken cancellationToken = default) =>
+        Inner.GetRejectedAsync(limit, cancellationToken);
+
+    public Task<int> PurgeAsync(IReadOnlyList<string> ids, long generation, CancellationToken cancellationToken = default) =>
+        Inner.PurgeAsync(ids, generation, cancellationToken);
 
     public Task<HlcTimestamp> GetClockHighWaterAsync(CancellationToken cancellationToken = default) => Inner.GetClockHighWaterAsync(cancellationToken);
 }
@@ -134,12 +146,12 @@ public sealed class TestReplica
         Conflicts.IConflictHandler<Note>? conflictHandler = null,
         SyncOptions<Note>? options = null,
         IPhysicalClock? physicalClock = null,
-        InMemoryLocalStore<Note>? store = null,
+        ILocalStore<Note>? store = null,
         Func<ISyncTransport<Note>, ISyncTransport<Note>>? transport = null)
     {
         Physical = physicalClock ?? new ManualClock(1_000);
         Store = new InterceptingStore<Note>(store ?? new InMemoryLocalStore<Note>(NoteJson.Clone));
-        ISyncTransport<Note> wire = new Server.InProcessTransport<Note>(server.Server);
+        ISyncTransport<Note> wire = new ServerRefTransport(server);
         Transport = new FaultyTransport<Note>(transport is null ? wire : transport(wire));
         Clock = new HybridLogicalClock(node, Physical);
         Engine = new SyncEngine<Note>(Store, Transport, Clock, NoteJson.Clone, conflictHandler, options);
@@ -159,10 +171,27 @@ public sealed class TestReplica
         await Engine.GetAsync(id) ?? throw new InvalidOperationException($"No record '{id}'.");
 }
 
-/// <summary>Holds a server so replicas can share it.</summary>
+/// <summary>Holds a server so replicas can share it, and lets tests replace it (restore from backup).</summary>
 public sealed class InMemorySyncServerRef(Server.InMemorySyncServer<Note> server)
 {
-    public Server.InMemorySyncServer<Note> Server { get; } = server;
+    public Server.InMemorySyncServer<Note> Server { get; private set; } = server;
+
+    /// <summary>
+    /// Replaces the server with one restored from <paramref name="backup"/>, with a new epoch and a version
+    /// floor above everything the replaced server issued.
+    /// </summary>
+    public void Restore(Server.InMemorySyncServerBackup<Note> backup, IPhysicalClock? clock = null)
+    {
+        var options = NoteJson.ServerOptions(clock);
+        Server = new Server.InMemorySyncServer<Note>(new Server.InMemorySyncServerOptions<Note>
+        {
+            Cloner = options.Cloner,
+            Fingerprint = options.Fingerprint,
+            PhysicalClock = options.PhysicalClock,
+            RestoreFrom = backup,
+            VersionFloor = Server.HighestVersion,
+        });
+    }
 
     public static InMemorySyncServerRef Create(IPhysicalClock? clock = null) =>
         new(new Server.InMemorySyncServer<Note>(NoteJson.ServerOptions(clock)));
@@ -198,4 +227,17 @@ public sealed class JsonWireTransport<T>(ISyncTransport<T> inner, System.Text.Js
         var bytes = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(value, typeInfo);
         return System.Text.Json.JsonSerializer.Deserialize(bytes, typeInfo)!;
     }
+}
+
+/// <summary>Routes calls to whatever server an <see cref="InMemorySyncServerRef"/> currently holds.</summary>
+public sealed class ServerRefTransport(InMemorySyncServerRef server) : ISyncTransport<Note>
+{
+    public Task<PullResult<Note>> PullAsync(PullRequest request, CancellationToken cancellationToken = default) =>
+        new Server.InProcessTransport<Note>(server.Server).PullAsync(request, cancellationToken);
+
+    public Task<PushResult<Note>> PushAsync(PushRequest<Note> request, CancellationToken cancellationToken = default) =>
+        new Server.InProcessTransport<Note>(server.Server).PushAsync(request, cancellationToken);
+
+    public IAsyncEnumerable<StreamEvent<Note>> StreamAsync(Checkpoint since, CancellationToken cancellationToken = default) =>
+        new Server.InProcessTransport<Note>(server.Server).StreamAsync(since, cancellationToken);
 }

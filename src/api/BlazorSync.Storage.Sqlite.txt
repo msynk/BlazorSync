@@ -1,0 +1,44 @@
+enum BlazorSync.Storage.Sqlite.SqliteDurability
+  Full = 0
+  Normal = 1
+sealed class BlazorSync.Storage.Sqlite.SqliteLocalStoreOptions
+  BlazorSync.Storage.Sqlite.SqliteDurability Durability { get; init; }
+  System.String Collection { get; init; }
+  System.String DataSource { get; init; }
+  System.TimeSpan BusyTimeout { get; init; }
+  ctor()
+sealed class BlazorSync.Storage.Sqlite.SqliteLocalStore<TDocument> : BlazorSync.Storage.ILocalStore<TDocument> where TDocument : class, BlazorSync.ISyncEntity
+  System.Threading.Tasks.Task<BlazorSync.Clocks.HlcTimestamp> GetClockHighWaterAsync(System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<BlazorSync.Storage.ReplicaCursor> GetCursorAsync(System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<BlazorSync.Storage.ReplicaIdentity> BeginNewIncarnationAsync(System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<BlazorSync.Storage.ReplicaIdentity> GetReplicaIdentityAsync(System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<BlazorSync.Storage.SyncRecord<TDocument>> GetAsync(System.String id, System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<BlazorSync.Storage.RecordUpdateResult<TDocument>>> UpdateAsync(System.Collections.Generic.IReadOnlyList<BlazorSync.Storage.RecordUpdate<TDocument>> updates, BlazorSync.Storage.ReplicaCursor? cursor = null, System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<BlazorSync.Storage.SyncRecord<TDocument>>> GetConflictsAsync(System.Int32 limit, System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<BlazorSync.Storage.SyncRecord<TDocument>>> GetPendingAsync(System.Int32 limit, System.Collections.Generic.IReadOnlySet<System.String> exclude = null, System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<BlazorSync.Storage.SyncRecord<TDocument>>> GetRejectedAsync(System.Int32 limit, System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<BlazorSync.Storage.SyncRecord<TDocument>>> GetStaleAsync(System.Int64 generation, System.Int32 limit, System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TDocument>> QueryAsync(System.Boolean includeDeleted = false, System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<System.Int32> CountDirtyAsync(System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<System.Int32> PurgeAsync(System.Collections.Generic.IReadOnlyList<System.String> ids, System.Int64 generation, System.Threading.CancellationToken cancellationToken = default)
+  const System.Int32 SchemaVersion = 2
+  static System.Threading.Tasks.Task<BlazorSync.Storage.Sqlite.SqliteLocalStore<TDocument>> OpenAsync(BlazorSync.Storage.Sqlite.SqliteLocalStoreOptions options, System.Text.Json.Serialization.Metadata.JsonTypeInfo<TDocument> typeInfo, System.Threading.CancellationToken cancellationToken = default)
+record BlazorSync.Storage.Sqlite.SqliteRebuildReport
+  System.Boolean Complete { get; }
+  System.Boolean Equals(BlazorSync.Storage.Sqlite.SqliteRebuildReport other)
+  System.Int32 DiscardedRecords { get; init; }
+  System.Int32 SalvagedRecords { get; init; }
+  System.String DamagedCopy { get; init; }
+  System.String ReadError { get; init; }
+  System.Void Deconstruct(out System.String DamagedCopy, out System.Int32 SalvagedRecords, out System.String ReadError, out System.Int32 DiscardedRecords)
+  ctor(System.String DamagedCopy, System.Int32 SalvagedRecords, System.String ReadError, System.Int32 DiscardedRecords = 0)
+  virtual System.Boolean Equals(System.Object obj)
+  virtual System.Int32 GetHashCode()
+  virtual System.String ToString()
+static class BlazorSync.Storage.Sqlite.SqliteStorePool
+  static System.Void Release(System.String dataSource)
+static class BlazorSync.Storage.Sqlite.SqliteStoreRecovery
+  static System.Threading.Tasks.Task<BlazorSync.Storage.Sqlite.SqliteRebuildReport> RebuildAsync(System.String dataSource, System.Threading.CancellationToken cancellationToken = default)
+  static System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<System.String>> CheckAsync(System.String dataSource, System.Threading.CancellationToken cancellationToken = default)
+sealed class BlazorSync.Storage.Sqlite.SqliteStoreSchemaException : System.NotSupportedException, System.Runtime.Serialization.ISerializable
+  ctor(System.String message)

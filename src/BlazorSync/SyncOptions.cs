@@ -31,9 +31,16 @@ public sealed class SyncOptions<TDocument>
     /// </summary>
     public int MaxConflictRetries { get; init; } = 3;
 
+    /// <summary>
+    /// The engine's name in traces and metrics (tag <c>blazorsync.name</c>), for example the collection name. Keep it
+    /// low-cardinality and free of personal data. Default: the document type name.
+    /// </summary>
+    public string DiagnosticsName { get; init; } = typeof(TDocument).Name;
+
     /// <summary>Throws <see cref="ArgumentOutOfRangeException"/> if any value is out of range.</summary>
     public void Validate()
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(DiagnosticsName, nameof(DiagnosticsName));
         ArgumentOutOfRangeException.ThrowIfLessThan(PullBatchSize, 1, nameof(PullBatchSize));
         ArgumentOutOfRangeException.ThrowIfLessThan(MaxPullPages, 1, nameof(MaxPullPages));
         ArgumentOutOfRangeException.ThrowIfLessThan(PushBatchSize, 1, nameof(PushBatchSize));

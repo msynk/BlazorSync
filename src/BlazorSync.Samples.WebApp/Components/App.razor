@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <base href="/" />
+    <style>
+        body { font-family: system-ui, sans-serif; margin: 0 auto; max-width: 44rem; padding: 1rem; }
+        nav a { margin-right: 1rem; }
+    </style>
+    <ImportMap />
+    <HeadOutlet />
+</head>
+<body>
+    <nav>
+        <a href="/">Home</a>
+        <a href="/ssr">Static SSR</a>
+        <a href="/server">Interactive Server</a>
+        <a href="/wasm">Interactive WebAssembly</a>
+        <a href="/auto">Auto</a>
+    </nav>
+    <Routes />
+    <script src="_framework/blazor.web.js"></script>
+</body>
+</html>

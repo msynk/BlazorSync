@@ -1,0 +1,183 @@
+static class BlazorSync.Blazor.BlazorSyncServiceCollectionExtensions
+  static Microsoft.Extensions.DependencyInjection.IServiceCollection AddLocalSyncCollection<TDocument>(Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Func<System.IServiceProvider, BlazorSync.Blazor.SyncSessionOptions<TDocument>> options, System.Func<System.IServiceProvider, System.Threading.CancellationToken, System.Threading.Tasks.Task<System.String>> resolveAccount = null) where TDocument : class, BlazorSync.ISyncEntity
+  static Microsoft.Extensions.DependencyInjection.IServiceCollection AddServerSyncCollection<TDocument>(Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Func<System.IServiceProvider, BlazorSync.Server.ISyncAuthority<TDocument>> authority, System.Func<TDocument, TDocument> cloner, System.Func<System.Security.Claims.ClaimsPrincipal, System.String> resolveScope = null) where TDocument : class, BlazorSync.ISyncEntity
+interface BlazorSync.Blazor.ISyncCollection<TDocument> where TDocument : class, BlazorSync.ISyncEntity
+  BlazorSync.Blazor.SyncCapabilities Capabilities { get; }
+  BlazorSync.Blazor.SyncStatus Status { get; }
+  abstract System.IDisposable Subscribe(System.Action onChanged)
+  abstract System.Threading.Tasks.Task<BlazorSync.Blazor.SyncItemStatus> GetItemStatusAsync(System.String id, System.Threading.CancellationToken cancellationToken = default)
+  abstract System.Threading.Tasks.Task<BlazorSync.Blazor.SyncWriteResult> DeleteAsync(System.String id, System.Threading.CancellationToken cancellationToken = default)
+  abstract System.Threading.Tasks.Task<BlazorSync.Blazor.SyncWriteResult> ResolveConflictAsync(System.String id, TDocument resolved, System.Threading.CancellationToken cancellationToken = default)
+  abstract System.Threading.Tasks.Task<BlazorSync.Blazor.SyncWriteResult> RetryAsync(System.String id, System.Threading.CancellationToken cancellationToken = default)
+  abstract System.Threading.Tasks.Task<BlazorSync.Blazor.SyncWriteResult> SaveAsync(TDocument document, System.Threading.CancellationToken cancellationToken = default)
+  abstract System.Threading.Tasks.Task<System.Boolean> DiscardConflictAsync(System.String id, System.Threading.CancellationToken cancellationToken = default)
+  abstract System.Threading.Tasks.Task<System.Boolean> RevertAsync(System.String id, System.Threading.CancellationToken cancellationToken = default)
+  abstract System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<BlazorSync.Blazor.SyncDocumentConflict<TDocument>>> GetConflictsAsync(System.Int32 limit = 100, System.Threading.CancellationToken cancellationToken = default)
+  abstract System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TDocument>> QueryAsync(BlazorSync.Blazor.SyncQuery<TDocument> query = null, System.Threading.CancellationToken cancellationToken = default)
+  abstract System.Threading.Tasks.Task<TDocument> GetAsync(System.String id, System.Threading.CancellationToken cancellationToken = default)
+record BlazorSync.Blazor.LocalReplica<TDocument> where TDocument : class, BlazorSync.ISyncEntity
+  BlazorSync.Storage.ILocalStore<TDocument> Store { get; init; }
+  System.Boolean Equals(BlazorSync.Blazor.LocalReplica<TDocument> other)
+  System.String NodeId { get; init; }
+  System.Void Deconstruct(out BlazorSync.Storage.ILocalStore<TDocument> Store, out System.String NodeId)
+  ctor(BlazorSync.Storage.ILocalStore<TDocument> Store, System.String NodeId)
+  virtual System.Boolean Equals(System.Object obj)
+  virtual System.Int32 GetHashCode()
+  virtual System.String ToString()
+sealed class BlazorSync.Blazor.LocalSyncCollection<TDocument> : BlazorSync.Blazor.ISyncCollection<TDocument> where TDocument : class, BlazorSync.ISyncEntity
+  BlazorSync.Blazor.SyncCapabilities Capabilities { get; }
+  BlazorSync.Blazor.SyncStatus Status { get; }
+  System.IDisposable Subscribe(System.Action onChanged)
+  System.Threading.Tasks.Task<BlazorSync.Blazor.SyncItemStatus> GetItemStatusAsync(System.String id, System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<BlazorSync.Blazor.SyncWriteResult> DeleteAsync(System.String id, System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<BlazorSync.Blazor.SyncWriteResult> ResolveConflictAsync(System.String id, TDocument resolved, System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<BlazorSync.Blazor.SyncWriteResult> RetryAsync(System.String id, System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<BlazorSync.Blazor.SyncWriteResult> SaveAsync(TDocument document, System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<System.Boolean> DiscardConflictAsync(System.String id, System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<System.Boolean> RevertAsync(System.String id, System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<BlazorSync.Blazor.SyncDocumentConflict<TDocument>>> GetConflictsAsync(System.Int32 limit = 100, System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TDocument>> QueryAsync(BlazorSync.Blazor.SyncQuery<TDocument> query = null, System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<TDocument> GetAsync(System.String id, System.Threading.CancellationToken cancellationToken = default)
+  ctor(BlazorSync.Blazor.SyncSession<TDocument> session, System.Func<System.Threading.CancellationToken, System.Threading.Tasks.Task<System.String>> resolveAccount)
+sealed class BlazorSync.Blazor.ServerSyncClock
+  BlazorSync.Clocks.HybridLogicalClock Clock { get; }
+  ctor()
+sealed class BlazorSync.Blazor.ServerSyncCollection<TDocument> : BlazorSync.Blazor.ISyncCollection<TDocument>, System.IDisposable where TDocument : class, BlazorSync.ISyncEntity
+  BlazorSync.Blazor.SyncCapabilities Capabilities { get; }
+  BlazorSync.Blazor.SyncStatus Status { get; }
+  System.IDisposable Subscribe(System.Action onChanged)
+  System.Int32 SubscriberCount { get; }
+  System.Threading.Tasks.Task<BlazorSync.Blazor.SyncItemStatus> GetItemStatusAsync(System.String id, System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<BlazorSync.Blazor.SyncWriteResult> DeleteAsync(System.String id, System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<BlazorSync.Blazor.SyncWriteResult> ResolveConflictAsync(System.String id, TDocument resolved, System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<BlazorSync.Blazor.SyncWriteResult> RetryAsync(System.String id, System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<BlazorSync.Blazor.SyncWriteResult> SaveAsync(TDocument document, System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<System.Boolean> DiscardConflictAsync(System.String id, System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<System.Boolean> RevertAsync(System.String id, System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<BlazorSync.Blazor.SyncDocumentConflict<TDocument>>> GetConflictsAsync(System.Int32 limit = 100, System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TDocument>> QueryAsync(BlazorSync.Blazor.SyncQuery<TDocument> query = null, System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<TDocument> GetAsync(System.String id, System.Threading.CancellationToken cancellationToken = default)
+  System.Void Dispose()
+  const System.Int32 ScanLimit = 10000
+  ctor(BlazorSync.Server.ISyncAuthority<TDocument> authority, System.Func<System.Threading.CancellationToken, System.Threading.Tasks.Task<BlazorSync.Server.SyncCallContext>> context, BlazorSync.Clocks.HybridLogicalClock clock, System.Func<TDocument, TDocument> cloner)
+record BlazorSync.Blazor.SyncCapabilities
+  System.Boolean DurableOfflineWrites { get; init; }
+  System.Boolean Equals(BlazorSync.Blazor.SyncCapabilities other)
+  System.Boolean LiveUpdates { get; init; }
+  System.Boolean WritesConfirmedByServer { get; init; }
+  System.String Host { get; init; }
+  System.Void Deconstruct(out System.String Host, out System.Boolean DurableOfflineWrites, out System.Boolean WritesConfirmedByServer, out System.Boolean LiveUpdates)
+  ctor(System.String Host, System.Boolean DurableOfflineWrites, System.Boolean WritesConfirmedByServer, System.Boolean LiveUpdates)
+  virtual System.Boolean Equals(System.Object obj)
+  virtual System.Int32 GetHashCode()
+  virtual System.String ToString()
+enum BlazorSync.Blazor.SyncConfirmation
+  AcceptedByServer = 1
+  Conflict = 2
+  NotFound = 4
+  Rejected = 3
+  SavedLocally = 0
+record BlazorSync.Blazor.SyncDocumentConflict<TDocument> where TDocument : class, BlazorSync.ISyncEntity
+  System.Boolean Equals(BlazorSync.Blazor.SyncDocumentConflict<TDocument> other)
+  System.String Id { get; init; }
+  System.Void Deconstruct(out System.String Id, out TDocument Local, out TDocument Server, out TDocument Base)
+  TDocument Base { get; init; }
+  TDocument Local { get; init; }
+  TDocument Server { get; init; }
+  ctor(System.String Id, TDocument Local, TDocument Server, TDocument Base)
+  virtual System.Boolean Equals(System.Object obj)
+  virtual System.Int32 GetHashCode()
+  virtual System.String ToString()
+enum BlazorSync.Blazor.SyncItemState
+  Conflicted = 4
+  MissingAfterReset = 3
+  Pending = 1
+  Rejected = 2
+  Synced = 0
+record BlazorSync.Blazor.SyncItemStatus
+  BlazorSync.Blazor.SyncItemState State { get; init; }
+  System.Boolean Equals(BlazorSync.Blazor.SyncItemStatus other)
+  System.String Detail { get; init; }
+  System.Void Deconstruct(out BlazorSync.Blazor.SyncItemState State, out System.String Detail)
+  ctor(BlazorSync.Blazor.SyncItemState State, System.String Detail = null)
+  virtual System.Boolean Equals(System.Object obj)
+  virtual System.Int32 GetHashCode()
+  virtual System.String ToString()
+record BlazorSync.Blazor.SyncQuery<TDocument> where TDocument : class, BlazorSync.ISyncEntity
+  System.Boolean Equals(BlazorSync.Blazor.SyncQuery<TDocument> other)
+  System.Comparison<TDocument> Order { get; init; }
+  System.Func<TDocument, System.Boolean> Where { get; init; }
+  System.Int32 Limit { get; init; }
+  const System.Int32 MaxLimit = 1000
+  ctor()
+  virtual System.Boolean Equals(System.Object obj)
+  virtual System.Int32 GetHashCode()
+  virtual System.String ToString()
+record BlazorSync.Blazor.SyncSessionOptions<TDocument> where TDocument : class, BlazorSync.ISyncEntity
+  BlazorSync.Conflicts.IConflictHandler<TDocument> ConflictHandler { get; init; }
+  BlazorSync.SyncOptions<TDocument> EngineOptions { get; init; }
+  Microsoft.Extensions.Logging.ILogger Logger { get; init; }
+  System.Boolean Equals(BlazorSync.Blazor.SyncSessionOptions<TDocument> other)
+  System.Boolean LiveHints { get; init; }
+  System.Func<BlazorSync.Blazor.SyncSession<TDocument>, System.String, System.Threading.CancellationToken, System.Threading.Tasks.Task<System.IAsyncDisposable>> AttachLifecycle { get; init; }
+  System.Func<System.String, BlazorSync.Transport.ISyncTransport<TDocument>> CreateTransport { get; init; }
+  System.Func<System.String, System.Threading.CancellationToken, System.Threading.Tasks.Task<BlazorSync.Blazor.LocalReplica<TDocument>>> OpenReplica { get; init; }
+  System.Func<System.String, System.Threading.CancellationToken, System.Threading.Tasks.Task<System.Boolean>> RenewCredentials { get; init; }
+  System.Func<System.String, System.Threading.CancellationToken, System.Threading.Tasks.Task<System.IAsyncDisposable>> AcquireLease { get; init; }
+  System.Func<TDocument, TDocument> Cloner { get; init; }
+  System.String Host { get; init; }
+  System.TimeProvider TimeProvider { get; init; }
+  System.TimeSpan FollowerRefresh { get; init; }
+  System.TimeSpan Interval { get; init; }
+  System.TimeSpan MaxBackoff { get; init; }
+  System.TimeSpan MinBackoff { get; init; }
+  ctor()
+  virtual System.Boolean Equals(System.Object obj)
+  virtual System.Int32 GetHashCode()
+  virtual System.String ToString()
+sealed class BlazorSync.Blazor.SyncSession<TDocument> : System.IAsyncDisposable where TDocument : class, BlazorSync.ISyncEntity
+  BlazorSync.Blazor.SyncStatus Status { get; }
+  System.Boolean LiveHints { get; }
+  System.String Account { get; }
+  System.String Host { get; }
+  System.Threading.Tasks.Task NotifyLocalWriteAsync(System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task StopAsync()
+  System.Threading.Tasks.Task<BlazorSync.SyncEngine<TDocument>> GetEngineAsync(System.String account, System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.ValueTask DisposeAsync()
+  System.Void Pause()
+  System.Void RequestSync()
+  System.Void Resume()
+  ctor(BlazorSync.Blazor.SyncSessionOptions<TDocument> options)
+  public event System.Action Changed
+enum BlazorSync.Blazor.SyncState
+  AttentionRequired = 5
+  Follower = 4
+  Offline = 3
+  Paused = 7
+  Starting = 0
+  Stopped = 6
+  Synced = 1
+  Syncing = 2
+record BlazorSync.Blazor.SyncStatus
+  BlazorSync.Blazor.SyncState State { get; init; }
+  System.Boolean Equals(BlazorSync.Blazor.SyncStatus other)
+  System.DateTimeOffset? LastSynced { get; init; }
+  System.Int32 Pending { get; init; }
+  System.String Detail { get; init; }
+  System.Void Deconstruct(out BlazorSync.Blazor.SyncState State, out System.Int32 Pending, out System.String Detail, out System.DateTimeOffset? LastSynced)
+  ctor(BlazorSync.Blazor.SyncState State, System.Int32 Pending, System.String Detail, System.DateTimeOffset? LastSynced)
+  static BlazorSync.Blazor.SyncStatus Starting { get; }
+  virtual System.Boolean Equals(System.Object obj)
+  virtual System.Int32 GetHashCode()
+  virtual System.String ToString()
+record BlazorSync.Blazor.SyncWriteResult
+  BlazorSync.Blazor.SyncConfirmation Confirmation { get; init; }
+  System.Boolean Equals(BlazorSync.Blazor.SyncWriteResult other)
+  System.Boolean Succeeded { get; }
+  System.String Id { get; init; }
+  System.String Message { get; init; }
+  System.Void Deconstruct(out System.String Id, out BlazorSync.Blazor.SyncConfirmation Confirmation, out System.String Message)
+  ctor(System.String Id, BlazorSync.Blazor.SyncConfirmation Confirmation, System.String Message = null)
+  virtual System.Boolean Equals(System.Object obj)
+  virtual System.Int32 GetHashCode()
+  virtual System.String ToString()

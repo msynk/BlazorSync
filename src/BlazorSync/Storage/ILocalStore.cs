@@ -26,9 +26,9 @@ public interface ILocalStore<TDocument>
     Task<SyncRecord<TDocument>?> GetAsync(string id, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Atomically applies <paramref name="updates"/> and, when <paramref name="checkpoint"/> is not
-    /// <see langword="null"/>, stores it as the new pull checkpoint. Either every change becomes
-    /// durable together or none does.
+    /// Atomically applies <paramref name="updates"/> and, when <paramref name="cursor"/> is not
+    /// <see langword="null"/>, stores it as the new replica cursor. Either every change becomes durable
+    /// together or none does.
     /// </summary>
     /// <param name="updates">
     /// One entry per distinct record id. Each transform receives an independent copy of the record's
@@ -36,12 +36,12 @@ public interface ILocalStore<TDocument>
     /// <see langword="null"/> to leave the record unchanged. Transforms must be pure and fast, must not
     /// call the store, and may be invoked more than once by optimistic implementations.
     /// </param>
-    /// <param name="checkpoint">The pull checkpoint to commit with the updates, if any.</param>
+    /// <param name="cursor">The replica cursor (checkpoint, generation) to commit with the updates, if any.</param>
     /// <param name="cancellationToken">Cancels the operation before it commits.</param>
     /// <returns>One result per update, in order.</returns>
     Task<IReadOnlyList<RecordUpdateResult<TDocument>>> UpdateAsync(
         IReadOnlyList<RecordUpdate<TDocument>> updates,
-        Checkpoint? checkpoint = null,
+        ReplicaCursor? cursor = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -58,13 +58,42 @@ public interface ILocalStore<TDocument>
     Task<int> CountDirtyAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Returns up to <paramref name="limit"/> clean records that are not marked
+    /// <see cref="SyncRecord{TDocument}.MissingAfterReset"/> and whose
+    /// <see cref="SyncRecord{TDocument}.Generation"/> is lower than <paramref name="generation"/>: the
+    /// records a completed resnapshot did not see.
+    /// </summary>
+    Task<IReadOnlyList<SyncRecord<TDocument>>> GetStaleAsync(
+        long generation,
+        int limit,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Returns up to <paramref name="limit"/> records with an unresolved <see cref="SyncRecord{TDocument}.Conflict"/>, in id order.</summary>
+    Task<IReadOnlyList<SyncRecord<TDocument>>> GetConflictsAsync(int limit, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Returns up to <paramref name="limit"/> records whose latest local change the server rejected
+    /// (<see cref="SyncRecord{TDocument}.Rejection"/> is set), in id order.
+    /// </summary>
+    Task<IReadOnlyList<SyncRecord<TDocument>>> GetRejectedAsync(int limit, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Physically removes the listed records that are still clean and belong to a generation older than
+    /// <paramref name="generation"/> (records a completed resnapshot did not see). Dirty records and records that keep
+    /// an unresolved <see cref="SyncRecord{TDocument}.Conflict"/> are never removed: both hold local changes.
+    /// Atomic; returns the number removed.
+    /// </summary>
+    Task<int> PurgeAsync(IReadOnlyList<string> ids, long generation, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Returns the app-visible documents. By default soft-deleted records are excluded; pass
-    /// <paramref name="includeDeleted"/> to include them.
+    /// <paramref name="includeDeleted"/> to include them. Records marked
+    /// <see cref="SyncRecord{TDocument}.MissingAfterReset"/> are never returned.
     /// </summary>
     Task<IReadOnlyList<TDocument>> QueryAsync(bool includeDeleted = false, CancellationToken cancellationToken = default);
 
-    /// <summary>Gets the pull checkpoint (resume position) for this collection.</summary>
-    Task<Checkpoint> GetCheckpointAsync(CancellationToken cancellationToken = default);
+    /// <summary>Gets the replica cursor (pull checkpoint and generation) for this collection.</summary>
+    Task<ReplicaCursor> GetCursorAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Returns the greatest <see cref="ISyncEntity.UpdatedAt"/> ever committed to this store, so a
@@ -86,3 +115,24 @@ public sealed record RecordUpdate<TDocument>(string Id, Func<SyncRecord<TDocumen
 /// <param name="Changed">Whether the transform produced a new state.</param>
 public sealed record RecordUpdateResult<TDocument>(SyncRecord<TDocument>? Record, bool Changed)
     where TDocument : class, ISyncEntity;
+
+/// <summary>
+/// The replica's position in the authority's history: the pull checkpoint, plus a generation that is
+/// incremented each time the replica has to resnapshot (for example after the authority was restored from
+/// a backup). Server versions are only compared within one generation.
+/// </summary>
+/// <param name="Checkpoint">The pull checkpoint.</param>
+/// <param name="Generation">The replica's current generation, starting at 0.</param>
+/// <param name="Resnapshot">
+/// <see langword="true"/> while a full pull after a reset is in progress; records not seen by the time it
+/// completes are marked <see cref="SyncRecord{TDocument}.MissingAfterReset"/>.
+/// </param>
+/// <param name="PurgeMissing">
+/// With <paramref name="Resnapshot"/>: remove (rather than hide) clean records the completed snapshot does not
+/// contain, because the reset happened for a change of access or retention rather than a server restore.
+/// </param>
+public readonly record struct ReplicaCursor(Checkpoint Checkpoint, long Generation, bool Resnapshot, bool PurgeMissing = false)
+{
+    /// <summary>The cursor of a replica that has never pulled.</summary>
+    public static readonly ReplicaCursor Initial = default;
+}

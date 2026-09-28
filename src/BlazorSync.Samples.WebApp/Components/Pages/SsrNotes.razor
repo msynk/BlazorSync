@@ -1,0 +1,43 @@
+@page "/ssr"
+@inject ISyncCollection<Note> Notes
+
+<PageTitle>Notes (static SSR)</PageTitle>
+<h1>Static server rendering</h1>
+<p>No interactivity and no JavaScript needed: the list is rendered per request and the form posts to the server.</p>
+<p>Running on <strong data-testid="host">@Notes.Capabilities.Host</strong>.</p>
+
+<form method="post" @formname="add-note" @onsubmit="AddAsync">
+    <AntiforgeryToken />
+    <input name="Text" data-testid="new-text" aria-label="New note" />
+    <button data-testid="add" type="submit">Add</button>
+</form>
+<p data-testid="last-result">@_lastResult</p>
+
+<ul>
+    @foreach (var note in _notes)
+    {
+        <li data-testid="note"><span data-testid="note-text">@note.Text</span></li>
+    }
+</ul>
+
+@code {
+    private IReadOnlyList<Note> _notes = [];
+    private string? _lastResult;
+
+    [SupplyParameterFromForm]
+    private string? Text { get; set; }
+
+    protected override Task OnInitializedAsync() => ReloadAsync();
+
+    private async Task AddAsync()
+    {
+        if (!string.IsNullOrWhiteSpace(Text))
+        {
+            _lastResult = (await Notes.SaveAsync(new Note { Text = Text.Trim() })).Confirmation.ToString();
+            await ReloadAsync();
+        }
+    }
+
+    private async Task ReloadAsync() =>
+        _notes = await Notes.QueryAsync(new SyncQuery<Note> { Order = (a, b) => b.UpdatedAt.CompareTo(a.UpdatedAt), Limit = 200 });
+}

@@ -5,35 +5,32 @@ using BlazorSync.Transport;
 namespace BlazorSync.Server;
 
 /// <summary>
-/// An <see cref="ISyncTransport{TDocument}"/> that calls an <see cref="InMemorySyncServer{TDocument}"/>
-/// directly in-process, with no network. Useful for tests and samples.
+/// An <see cref="ISyncTransport{TDocument}"/> that calls an <see cref="ISyncAuthority{TDocument}"/> directly
+/// in-process, with no network, on behalf of a fixed caller. Server-rendered hosts use it so in-process calls
+/// go through the same authority and authorization as HTTP calls (I18).
 /// </summary>
 /// <typeparam name="TDocument">The synchronized entity type.</typeparam>
 public sealed class InProcessTransport<TDocument> : ISyncTransport<TDocument>
     where TDocument : class, ISyncEntity
 {
-    private readonly InMemorySyncServer<TDocument> _server;
+    private readonly ISyncAuthority<TDocument> _authority;
+    private readonly SyncCallContext _context;
 
-    /// <summary>Wraps the given in-memory server.</summary>
-    public InProcessTransport(InMemorySyncServer<TDocument> server)
+    /// <summary>Calls <paramref name="authority"/> as <paramref name="context"/> (anonymous by default).</summary>
+    public InProcessTransport(ISyncAuthority<TDocument> authority, SyncCallContext? context = null)
     {
-        ArgumentNullException.ThrowIfNull(server);
-        _server = server;
+        ArgumentNullException.ThrowIfNull(authority);
+        _authority = authority;
+        _context = context ?? SyncCallContext.Anonymous;
     }
 
     /// <inheritdoc />
-    public Task<PullResult<TDocument>> PullAsync(PullRequest request, CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult(_server.Pull(request));
-    }
+    public Task<PullResult<TDocument>> PullAsync(PullRequest request, CancellationToken cancellationToken = default) =>
+        _authority.PullAsync(_context, request, cancellationToken);
 
     /// <inheritdoc />
-    public Task<PushResult<TDocument>> PushAsync(PushRequest<TDocument> request, CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult(_server.Push(request));
-    }
+    public Task<PushResult<TDocument>> PushAsync(PushRequest<TDocument> request, CancellationToken cancellationToken = default) =>
+        _authority.PushAsync(_context, request, cancellationToken);
 
     /// <inheritdoc />
     public async IAsyncEnumerable<StreamEvent<TDocument>> StreamAsync(

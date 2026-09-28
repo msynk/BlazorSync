@@ -21,15 +21,31 @@ public class SyncProtocolException : Exception
 }
 
 /// <summary>
-/// Thrown when the server can no longer serve the client's checkpoint (for example the checkpoint
-/// belongs to a different server epoch). Recovery requires a snapshot/reset flow that preserves
-/// pending local work; that flow is not implemented yet (see <c>docs/roadmap.md</c>).
+/// Thrown when the server can no longer serve the client's checkpoint. The engine then resnapshots, keeping
+/// pending local work (docs/protocol/v1.md §6.1).
 /// </summary>
 public sealed class SyncResetRequiredException : SyncProtocolException
 {
     /// <summary>Creates the exception.</summary>
-    public SyncResetRequiredException(string message)
+    public SyncResetRequiredException(string message, string reason = ResetReasons.Epoch)
         : base(message)
     {
+        Reason = reason;
     }
+
+    /// <summary>Why the checkpoint cannot be served; one of <see cref="ResetReasons"/>.</summary>
+    public string Reason { get; }
+}
+
+/// <summary>Reasons for <see cref="SyncResetRequiredException"/>.</summary>
+public static class ResetReasons
+{
+    /// <summary>The server's history changed (for example a restore). Records the snapshot lacks are hidden but kept on the device for inspection.</summary>
+    public const string Epoch = "epoch";
+
+    /// <summary>What the caller may see changed (permissions, filter). Records the snapshot lacks are removed from the device.</summary>
+    public const string ScopeChanged = "scope-changed";
+
+    /// <summary>The checkpoint is older than the server's retention horizon. Records the snapshot lacks are removed from the device.</summary>
+    public const string Expired = "expired";
 }

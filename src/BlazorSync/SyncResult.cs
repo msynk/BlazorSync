@@ -26,6 +26,24 @@ public readonly record struct SyncResult(int Pulled, int Pushed, int Conflicts)
     /// </summary>
     public bool HasRemainingWork { get; init; }
 
+    /// <summary>
+    /// <see langword="true"/> when the server required a reset and the replica started a new generation
+    /// with a full snapshot (see <c>SyncEngine.PullAsync</c>).
+    /// </summary>
+    public bool ResetPerformed { get; init; }
+
+    /// <summary>
+    /// Number of clean local records a completed post-reset snapshot did not contain; they are now marked
+    /// <c>SyncRecord.MissingAfterReset</c>.
+    /// </summary>
+    public int MissingAfterReset { get; init; }
+
+    /// <summary>
+    /// Number of clean local records removed after a reset for a change of access or retention: the caller may no
+    /// longer see them, or they were deleted and purged on the server.
+    /// </summary>
+    public int PurgedAfterReset { get; init; }
+
     /// <summary>Whether the run drained everything it could see without deferring or leaving work.</summary>
     public bool IsComplete => !HasRemainingWork && Deferred == 0;
 
@@ -36,5 +54,8 @@ public readonly record struct SyncResult(int Pulled, int Pushed, int Conflicts)
             Rejected = a.Rejected + b.Rejected,
             Deferred = a.Deferred + b.Deferred,
             HasRemainingWork = a.HasRemainingWork || b.HasRemainingWork,
+            ResetPerformed = a.ResetPerformed || b.ResetPerformed,
+            MissingAfterReset = a.MissingAfterReset + b.MissingAfterReset,
+            PurgedAfterReset = a.PurgedAfterReset + b.PurgedAfterReset,
         };
 }

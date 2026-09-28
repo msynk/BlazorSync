@@ -1,4 +1,5 @@
-using BlazorSync.Protocol;
+﻿using BlazorSync.Protocol;
+using BlazorSync.Storage;
 using BlazorSync.Tests.TestSupport;
 using Xunit;
 
@@ -53,18 +54,18 @@ public sealed class PullProtocolTests
     {
         var server = await SeededServerAsync(4);
         var client = new TestReplica(server, "a", options: new SyncOptions<Note> { PullBatchSize = 2 });
-        var before = await client.Store.GetCheckpointAsync();
+        var before = (await client.Store.GetCursorAsync()).Checkpoint;
 
         // The second page's transform throws on its second record.
         var pages = 0;
-        client.Store.BeforeUpdate = (_, updates, checkpoint) =>
+        client.Store.BeforeUpdate = (_, updates, cursor) =>
         {
-            if (checkpoint is not null && ++pages == 2)
+            if (cursor is not null && ++pages == 2)
             {
                 client.Store.BeforeUpdate = null;
                 return client.Store.Inner.UpdateAsync(
                     [updates[0], new(updates[1].Id, _ => throw new InjectedFaultException("crash mid-page"))],
-                    checkpoint);
+                    cursor);
             }
 
             return Task.CompletedTask;
@@ -73,7 +74,7 @@ public sealed class PullProtocolTests
         await Assert.ThrowsAsync<InjectedFaultException>(() => client.Engine.PullAsync());
 
         Assert.Equal(2, (await client.Engine.QueryAsync()).Count);
-        Assert.NotEqual(before, await client.Store.GetCheckpointAsync());
+        Assert.NotEqual(before, (await client.Store.GetCursorAsync()).Checkpoint);
 
         // Resuming continues from the first page's checkpoint and converges.
         var resumed = await client.Engine.PullAsync();
@@ -86,12 +87,12 @@ public sealed class PullProtocolTests
     {
         var server = await SeededServerAsync(2);
         var client = new TestReplica(server, "a");
-        Checkpoint? committed = null;
-        client.Store.BeforeUpdate = (_, updates, checkpoint) =>
+        ReplicaCursor? committed = null;
+        client.Store.BeforeUpdate = (_, updates, cursor) =>
         {
-            if (checkpoint is not null)
+            if (cursor is not null)
             {
-                committed = checkpoint;
+                committed = cursor;
                 Assert.Equal(2, updates.Count);
             }
 
@@ -100,7 +101,7 @@ public sealed class PullProtocolTests
 
         await client.Engine.PullAsync();
 
-        Assert.Equal(committed, await client.Store.GetCheckpointAsync());
+        Assert.Equal(committed, await client.Store.GetCursorAsync());
     }
 
     [Fact(DisplayName = "T34 I09: a page that claims more data without advancing is a protocol error")]
@@ -123,7 +124,7 @@ public sealed class PullProtocolTests
 
         await Assert.ThrowsAsync<SyncProtocolException>(() => client.Engine.PullAsync());
         Assert.Empty(await client.Engine.QueryAsync());
-        Assert.True((await client.Store.GetCheckpointAsync()).IsStart);
+        Assert.True((await client.Store.GetCursorAsync()).Checkpoint.IsStart);
     }
 
     [Fact(DisplayName = "T34 I09: an empty final page is accepted")]

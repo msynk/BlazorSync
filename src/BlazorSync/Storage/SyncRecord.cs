@@ -51,6 +51,25 @@ public sealed record SyncRecord<TDocument>(TDocument Current, TDocument? Base, b
     /// <summary>The server version of <see cref="Observed"/>.</summary>
     public long? ObservedVersion { get; init; }
 
+    /// <summary>
+    /// The replica generation (<see cref="ReplicaCursor.Generation"/>) in which the server state of this
+    /// record was last confirmed. Versions are only comparable within one generation.
+    /// </summary>
+    public long Generation { get; init; }
+
+    /// <summary>
+    /// Set when a resnapshot after a reset completed without the server returning this record. The record
+    /// is kept for inspection but hidden from queries; it is not a deletion and is not propagated. A later
+    /// pull or local write of the same id clears it.
+    /// </summary>
+    public bool MissingAfterReset { get; init; }
+
+    /// <summary>
+    /// An unresolved conflict kept for the application or user (see <see cref="Conflicts.ConflictOutcome.Defer"/>):
+    /// the record shows the server's state while the local change waits here. Cleared by resolving or discarding.
+    /// </summary>
+    public SyncConflict<TDocument>? Conflict { get; init; }
+
     /// <summary>Whether the record is waiting to be pushed (dirty and not rejected).</summary>
     public bool IsPushable => IsDirty && Rejection is null;
 
@@ -76,3 +95,12 @@ public sealed record PendingOperation<TDocument>(string OperationId, long Revisi
 /// <param name="ErrorCode">The server's machine-readable reason.</param>
 /// <param name="Message">The server's explanation, if any.</param>
 public sealed record SyncRejection(long Revision, string ErrorCode, string? Message);
+
+/// <summary>A conflict kept for later resolution.</summary>
+/// <typeparam name="TDocument">The synchronized entity type.</typeparam>
+/// <param name="Server">The server state the local change conflicted with.</param>
+/// <param name="ServerVersion">The server version of <paramref name="Server"/>.</param>
+/// <param name="Local">The local change that was not applied.</param>
+/// <param name="Base">The common ancestor the local change was made from, if known.</param>
+public sealed record SyncConflict<TDocument>(TDocument Server, long ServerVersion, TDocument Local, TDocument? Base)
+    where TDocument : class, ISyncEntity;

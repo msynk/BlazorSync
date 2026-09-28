@@ -96,8 +96,8 @@ public sealed class SyncEngineTests
     public async Task ConcurrentEdit_ClientWins_LateClientOverwritesServer()
     {
         var server = new InMemorySyncServer<Note>();
-        var clientA = CreateClient(server, "client-a"); // default = client-wins
-        var clientB = CreateClient(server, "client-b");
+        var clientA = CreateClient(server, "client-a", new ClientWinsConflictHandler<Note>());
+        var clientB = CreateClient(server, "client-b", new ClientWinsConflictHandler<Note>());
 
         // Both start from the same synced baseline.
         await clientA.WriteAsync(new Note { Id = "n1", Title = "base" });

@@ -3,15 +3,16 @@
 Local-first document replication for .NET and Blazor: local writes that never wait for the network,
 change tracking, retry-safe push, checkpointed pull and pluggable conflict resolution.
 
-> **Status: pre-1.0 prototype.** The protocol engine, clock and conflict handling are tested in-process.
-> There is no durable store, HTTP transport, persistent server or authorization yet, so it is not ready
-> for production data. See [docs/support-matrix.md](docs/support-matrix.md) and [docs/roadmap.md](docs/roadmap.md).
-> Targets `net10.0`.
+> **Status: pre-1.0, not published.** Durable client stores (SQLite on native hosts, IndexedDB in browsers),
+> the HTTP binding and the Blazor integration are tested, including in Chromium, Firefox and WebKit. The only
+> server authority is the in-memory reference implementation, which loses its data on restart, so this is not
+> ready for production data yet. See [docs/support-matrix.md](docs/support-matrix.md) and
+> [docs/roadmap.md](docs/roadmap.md). Targets `net10.0`.
 
 ## What it guarantees today
 
-Precisely, and only for the in-memory reference store and authority (details in
-[docs/architecture/invariants.md](docs/architecture/invariants.md)):
+Precisely, for the reference authority and the stores that pass the conformance suite (in-memory, SQLite,
+IndexedDB; details and evidence in [docs/architecture/invariants.md](docs/architecture/invariants.md)):
 
 - **Atomic local writes.** A write and its pending upload commit together and never wait for the network.
 - **No lost local edits.** An acknowledgement, pull or conflict resolution never overwrites or marks clean
@@ -20,13 +21,15 @@ Precisely, and only for the in-memory reference store and authority (details in
   response is lost, the same operation is resent and the server replays its original outcome.
 - **Per-document optimistic concurrency.** The server accepts a write only if it was based on the current
   version; otherwise it returns a conflict for the client's handler.
+- **Nothing overwritten by default.** A conflicting local change is kept as an unresolved conflict next to
+  the server state until the app or user decides (or a policy you choose decides).
 - **Atomic, monotone pull.** A page and its checkpoint commit together; older versions never replace newer
   ones.
 - **Bounded, honest runs.** Batch and retry budgets are enforced, and `SyncResult.IsComplete` says whether
   work remains.
 
-It does **not** provide cross-document transactions, causal consistency, live notifications, offline
-execution for purely server-rendered UI, or schema migration yet.
+It does **not** provide cross-document transactions, causal consistency, a durable server authority, or
+offline execution for purely server-rendered UI.
 
 ## Project layout
 
@@ -34,8 +37,21 @@ execution for purely server-rendered UI, or schema migration yet.
 src/BlazorSync.slnx                 Solution
 src/BlazorSync/                     Protocol library (engine, clock, conflicts, storage/transport contracts,
                                     in-memory reference store and authority)
+src/BlazorSync.Storage.Sqlite/      Durable SQLite store for native hosts (MAUI, WPF, WinForms, console)
+src/BlazorSync.Server.AspNetCore/   ASP.NET Core endpoints for the protocol over any ISyncAuthority
+src/BlazorSync.Transport.Http/      HTTP client transport (browser and native)
+src/BlazorSync.Storage.IndexedDb/   Durable browser store (IndexedDB) with a multi-tab replication lease
+src/BlazorSync.Testing/             Provider conformance cases (framework-free; also run in browsers)
+src/BlazorSync.Blazor/              Blazor integration: ISyncCollection, local session, server-connected collection
+src/BlazorSync.Samples.Shared/      Note model + NotesPanel component shared by the samples
+src/BlazorSync.Samples.Notes.*      Offline-capable notes PWA: ASP.NET Core server + WebAssembly client
+src/BlazorSync.Samples.WebApp*      Blazor Web App: one component in static SSR, Server, WebAssembly and Auto
+src/BlazorSync.Tests.Browser/       Playwright tests (Chromium, Firefox, WebKit) and their WASM harness
 src/BlazorSync.Tests/               xUnit tests: unit, regression, provider conformance, wire fixtures,
-                                    fault injection, seeded randomized convergence
+                                    fault injection, process-kill, seeded randomized convergence
+src/BlazorSync.Tests.CrashHost/     Helper process the tests kill mid-write
+src/BlazorSync.Benchmarks/          BenchmarkDotNet workloads (docs/benchmarks.md)
+src/api/                            Public API baselines checked by PublicApiTests
 src/BlazorSync.Demo/                Blazor WebAssembly playground simulating several devices in one tab
 docs/                               Baseline review, architecture decisions, invariants, roadmap, compatibility
 ```
@@ -62,6 +78,7 @@ Replication metadata lives in the store's `SyncRecord<T>` envelope, not on the e
 | `Pending` | The persisted operation (id, revision, base version, immutable payload) being sent. |
 | `Base`, `BaseVersion` | Last confirmed server state and its server version (the concurrency token). |
 | `Rejection` | Set when the server permanently rejected a revision; the record is parked until edited again. |
+| `Conflict` | A local change kept after it conflicted with a newer server change: server state, local change, common ancestor. |
 | Checkpoint | Opaque server-issued feed position (per store). |
 
 ### Local writes
@@ -83,7 +100,7 @@ new id, then sends it with the base version it was made against. Each operation 
 
 - **Accepted**: the record adopts the server version, unless it was edited again meanwhile, in which case
   the later edit stays pending on the new base.
-- **Conflict**: the configured `IConflictHandler<T>` decides.
+- **Conflict**: the configured `IConflictHandler<T>` decides; by default the conflict is kept for a decision.
 - **Rejected**: the record is parked with `SyncRecord.Rejection` and does not block other records.
 - **Retry later** or no outcome: the operation stays pending and is resent with the same id.
 
@@ -93,14 +110,33 @@ new id, then sends it with the base version it was made against. Each operation 
 
 | Handler | Behaviour |
 | --- | --- |
-| `ClientWinsConflictHandler<T>` | **Default.** Local change is re-pushed over the concurrent server change (the remote edit is lost). |
+| `DeferConflictHandler<T>` | **Default.** Shows the server state and keeps the local change as an unresolved conflict. Nothing is lost. |
+| `ThreeWayMergeConflictHandler<T>` | Merges changes to different fields (JSON-level, AOT-safe) and pushes the result; same-field conflicts go to a fallback (`Defer` by default). |
+| `ClientWinsConflictHandler<T>` | Local change is re-pushed over the concurrent server change (the remote edit is lost). |
 | `ServerWinsConflictHandler<T>` | Server state wins; the conflicting local change is discarded. |
 | `LastWriteWinsConflictHandler<T>` | The later *authoring* timestamp wins, independent of upload order. Depends on roughly synchronized clocks. |
 | `DelegateConflictHandler<T>` | Wraps a function for custom merges. |
 
 A handler receives copies of `RealMaster` (server current), `AssumedMaster` (the base of the local edit)
-and `Fork` (latest local state) and returns `AcceptMaster()`, `KeepFork()` or `Resolve(merged)`. Handlers
-must be deterministic and side-effect free; they never run for a replayed outcome.
+and `Fork` (latest local state) and returns `AcceptMaster()`, `KeepFork()`, `Resolve(merged)` or `Defer()`.
+Handlers must be deterministic and side-effect free; they never run for a replayed outcome.
+
+Kept conflicts survive restarts and are decided explicitly:
+
+```csharp
+foreach (var record in await engine.GetConflictsAsync())
+{
+    var (server, mine, ancestor) = (record.Conflict!.Server, record.Conflict.Local, record.Conflict.Base);
+    var merge = ancestor is null ? null : ThreeWayMerge.Merge(ancestor, mine, server, AppJsonContext.Default.Note);
+    if (merge is { IsClean: true }) await engine.ResolveConflictAsync(record.Current.Id, merge.Merged);
+    else await engine.DiscardConflictAsync(record.Current.Id);   // or show both versions to the user
+}
+```
+
+Merge rules: members changed on one side win; different changes of the same member conflict (the server
+value is kept and the JSON Pointer reported); objects merge per member, arrays and scalars are atomic, an
+absent member differs from `null`, and delete versus edit is a conflict. Counters and sets are not merged
+semantically.
 
 ## Getting started
 
@@ -168,6 +204,161 @@ var server = new InMemorySyncServer<Note>(new InMemorySyncServerOptions<Note>
 });
 ```
 
+## Durable storage on native hosts (SQLite)
+
+```csharp
+var store = await SqliteLocalStore<Note>.OpenAsync(
+    new SqliteLocalStoreOptions { DataSource = Path.Combine(appData, "replica.db"), Collection = "notes" },
+    AppJsonContext.Default.Note);
+
+var identity = await store.GetReplicaIdentityAsync();          // stable replica id + incarnation
+var clock = new HybridLogicalClock(identity.Incarnation);      // a copied database gets a new incarnation
+var engine = new SyncEngine<Note>(store, transport, clock, DocumentCloner.Json(AppJsonContext.Default.Note));
+```
+
+Every store update is one SQLite transaction (WAL, `synchronous=FULL` by default). Acknowledged local
+writes survive process termination (tested by killing a writer process); power loss is not tested. Call
+`BeginNewIncarnationAsync` when a database file may have been copied or restored from a device backup.
+Not for Blazor WebAssembly; use the IndexedDB store there. Store schemas are versioned and upgrade in place on
+first open (pending work is kept); a database written by a newer version of the app is refused, not
+modified.
+
+## Blazor: one component, every render mode
+
+Components inject `ISyncCollection<T>` and never depend on the render mode:
+
+```razor
+@inject ISyncCollection<Note> Notes
+...
+var result = await Notes.SaveAsync(note);   // SavedLocally (WebAssembly/native) or AcceptedByServer (server)
+using var subscription = Notes.Subscribe(() => InvokeAsync(ReloadAsync));
+```
+
+Each runtime registers the implementation that fits it:
+
+```csharp
+// Server project (Interactive Server, prerendering, static SSR): calls the authority in-process as the user.
+builder.Services.AddServerSyncCollection<Note>(_ => authority, DocumentCloner.Json(AppJson.Default.Note),
+    user => user.FindFirst("tenant")?.Value);
+
+// WebAssembly client project: an IndexedDB replica per account, synced over HTTP by one tab.
+builder.Services.AddBrowserSyncCollection<Note>("notes", AppJson.Default.Note,
+    (sp, account) => new HttpSyncTransport<Note>(http, transportOptions, SyncJsonTypes<Note>.From(AppJson.Default)),
+    resolveAccount: (sp, ct) => /* signed-in user id */);
+```
+
+`Capabilities` says what the host can do (offline writes, server-confirmed writes, live updates),
+`Status` reports `Synced`, `Syncing`, `Offline`, `Follower`, `Paused`, `AttentionRequired` and so on, and
+`GetItemStatusAsync(id)` tells whether one document is still pending, rejected or conflicted.
+`GetConflictsAsync`, `ResolveConflictAsync` and `DiscardConflictAsync` expose kept conflicts to components
+(the samples' `NotesPanel` offers "Keep mine" / "Keep theirs"). See `src/BlazorSync.Samples.WebApp` for all
+four render modes side by side.
+
+Browser sessions sync after each local write, when the browser comes back online or the tab becomes visible,
+when the server announces a change over its Server-Sent Events hint stream, and on an interval as a safety
+net. Hints only make things faster: losing them never loses data. If your app has a service worker, do not
+let it proxy `/sync/` requests; a proxied hint stream blocks service-worker updates.
+
+## Durable storage in the browser (IndexedDB)
+
+```csharp
+var store = await IndexedDbLocalStore<Note>.OpenAsync(jsRuntime,
+    new IndexedDbStoreOptions { DatabaseName = $"blazorsync-{userId}", Collection = "notes" },
+    AppJsonContext.Default.Note);
+
+// Only one tab should run the sync loop; others read and write locally.
+await using var lease = await IndexedDbReplicaLease.TryAcquireAsync(jsRuntime, $"blazorsync-{userId}");
+```
+
+Open it only once the WebAssembly runtime is interactive (never during prerendering). Writes from several
+tabs are safe: every update commits in one IndexedDB transaction and only if no other tab changed the same
+records first. Failures (IndexedDB missing, quota, an upgrade from another tab) surface as
+`LocalStoreUnavailableException`. See `src/BlazorSync.Samples.Notes.Client` for a complete offline PWA.
+
+## Server restores, access changes and retention
+
+If the server is restored from a backup, it must start a new epoch and never reuse a version number.
+Replicas then reset automatically: they keep pending edits and kept conflicts, pull a fresh snapshot, and
+mark local records the restored server no longer has as `MissingAfterReset` (hidden, not deleted).
+
+When what a user may see changes (revoked or granted access, a different filter), the authority's
+`ScopeFingerprint` changes and the old checkpoint is refused with reason `scope-changed`; the replica
+resnapshots and removes documents it may no longer see from the device (never from the server). Documents
+with local changes or kept conflicts are never removed.
+
+Tombstones and operation receipts can be purged on the server (`PurgeTombstones`, `PurgeReceipts`). A
+replica offline for longer than the retention horizon resets (`expired`), and an edit based on a purged
+document is rejected with `base-expired` rather than resurrecting it; writing it again recreates it.
+`SyncResult.ResetPerformed`, `MissingAfterReset` and `PurgedAfterReset` report what happened. See
+`docs/protocol/v1.md` §4 and §6.1.
+
+## When something goes wrong
+
+- A rejected change stays parked: list it with `GetRejectedAsync`, fix the cause, then `RetryRejectedAsync`
+  (a new operation), or `RevertAsync` to go back to the server state. Components use
+  `ISyncCollection.RetryAsync`/`RevertAsync`.
+- `ExportLocalChangesAsync`/`ImportLocalChangesAsync` move unsynchronized work, with its operation ids, to
+  another store.
+- A damaged SQLite file: `SqliteStoreRecovery.CheckAsync(path)`, then `RebuildAsync(path)`. The rebuild moves
+  the file aside (never deletes it), keeps every readable record with local work, and resyncs the rest.
+
+See [docs/operations/disaster-recovery.md](docs/operations/disaster-recovery.md) for server restores,
+retention, schema roll-outs and the full runbook.
+
+## Observability
+
+Traces and metrics use the .NET built-ins: `ActivitySource`/`Meter` named `BlazorSync` (client engine) and the
+`BlazorSync.Server` meter (endpoints). The session and endpoints log through `ILogger`. Nothing records document
+contents or ids.
+
+```csharp
+builder.Services.AddOpenTelemetry()
+    .WithTracing(t => t.AddSource(SyncDiagnostics.SourceName))
+    .WithMetrics(m => m.AddMeter(SyncDiagnostics.SourceName, SyncEndpoints.MeterName));
+```
+
+Instruments, tags and alert suggestions: [docs/operations/observability.md](docs/operations/observability.md).
+Benchmark results: [docs/benchmarks.md](docs/benchmarks.md).
+
+## Observing changes
+
+```csharp
+using var subscription = engine.Observe(change =>
+    Console.WriteLine($"{change.Kind}: {string.Join(", ", change.Ids)}"));
+```
+
+One callback per committed transaction, after the commit. Dispatch to your UI thread yourself.
+
+## Serving and calling over HTTP
+
+Server (ASP.NET Core):
+
+```csharp
+var json = SyncJsonTypes<Note>.From(AppJsonContext.Default);   // context declares the 4 protocol types
+var authority = new ScopedAuthority<Note>(
+    scope => new InMemorySyncServer<Note>(serverOptions),         // one isolated authority per tenant
+    new AuthorityLimits(MaxOperationsPerPush: 1000, MaxPageSize: 1000));
+
+app.MapSyncCollection("notes", authority, json, new SyncEndpointOptions
+{
+    SupportedSchemas = new HashSet<string> { "notes-v1" },
+    ResolveScope = http => http.User.FindFirst("tenant")?.Value, // from authenticated claims only
+}).RequireAuthorization();
+```
+
+Client (WebAssembly or native):
+
+```csharp
+var transport = new HttpSyncTransport<Note>(httpClient,
+    new HttpSyncTransportOptions { Collection = "notes", SchemaId = "notes-v1" }, json);
+```
+
+Errors surface as `SyncResetRequiredException` (handled by the engine), `SyncProtocolException`, or
+`SyncTransportException` with `ErrorCode`, `IsTransient` and `RetryAfter`. Server-rendered code calls the
+same authority in-process with `new InProcessTransport<Note>(authority, new SyncCallContext(user, scope))`,
+so authorization is identical. `CanRead`/`CanWrite` hooks on the reference authority filter and authorize
+per document. The in-memory authority is still the only authority; a PostgreSQL-backed one is planned.
+
 ## Wire protocol
 
 The messages, JSON encoding (64-bit versions as digit strings, canonical HLC strings, opaque checkpoints)
@@ -207,6 +398,21 @@ dotnet publish src/BlazorSync.Demo -c Release                              # opt
 dotnet publish src/BlazorSync.Demo -c Release -p:RunAOTCompilation=true    # needs the wasm-tools workload
 ```
 
+Browser tests (download Playwright's Chromium, Firefox and WebKit on first run, about 500 MB):
+
+```bash
+dotnet test src/BlazorSync.Tests.Browser -c Release
+dotnet test src/BlazorSync.Tests.Browser -c Release -p:BrowserHostAot=true   # same tests, WebAssembly AOT build
+```
+
+A change to a package's public API fails `PublicApiTests` until the baseline in `src/api` is regenerated on purpose
+(`BLAZORSYNC_UPDATE_API=1 dotnet test src/BlazorSync.Tests --filter PublicApiTests`) and reviewed. `dotnet pack` builds
+the seven library packages (`0.1.0-preview`); nothing is published from this repository's tooling.
+CI: `.github/workflows/ci.yml` (Windows, Linux and macOS unit tests, browser tests, pack).
+
+Run the notes sample: `dotnet run --project src/BlazorSync.Samples.Notes.Server` (the offline service worker
+is active only in a published build).
+
 Test display names carry invariant (`I04`) and catalogue (`T11`) ids, for example:
 
 ```bash
@@ -219,6 +425,8 @@ dotnet test src/BlazorSync.slnx --filter "DisplayName~I04"
 - [Architecture decisions and invariants](docs/architecture/README.md).
 - [Protocol specification v1](docs/protocol/v1.md).
 - [Compatibility policy and migration notes](docs/compatibility.md).
+- [Disaster recovery and stuck replicas](docs/operations/disaster-recovery.md) and [observability](docs/operations/observability.md).
+- [Benchmarks](docs/benchmarks.md).
 - [Support matrix](docs/support-matrix.md) and [roadmap](docs/roadmap.md).
 
 ## License

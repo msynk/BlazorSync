@@ -16,7 +16,7 @@ public sealed class InMemoryLocalStore<TDocument> : ILocalStore<TDocument>
     private readonly Dictionary<string, SyncRecord<TDocument>> _records = new(StringComparer.Ordinal);
     private readonly Func<TDocument, TDocument> _clone;
     private readonly object _gate = new();
-    private Checkpoint _checkpoint = Checkpoint.Start;
+    private ReplicaCursor _cursor = ReplicaCursor.Initial;
     private HlcTimestamp _highWater = HlcTimestamp.MinValue;
 
     /// <summary>Creates a store that clones with reflection-based JSON (not trim/AOT safe).</summary>
@@ -47,7 +47,7 @@ public sealed class InMemoryLocalStore<TDocument> : ILocalStore<TDocument>
     /// <inheritdoc />
     public Task<IReadOnlyList<RecordUpdateResult<TDocument>>> UpdateAsync(
         IReadOnlyList<RecordUpdate<TDocument>> updates,
-        Checkpoint? checkpoint = null,
+        ReplicaCursor? cursor = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(updates);
@@ -96,9 +96,9 @@ public sealed class InMemoryLocalStore<TDocument> : ILocalStore<TDocument>
                 results.Add(new RecordUpdateResult<TDocument>(record is null ? null : CloneRecord(record), changed));
             }
 
-            if (checkpoint is { } committed)
+            if (cursor is { } committed)
             {
-                _checkpoint = committed;
+                _cursor = committed;
             }
 
             return Task.FromResult<IReadOnlyList<RecordUpdateResult<TDocument>>>(results);
@@ -141,7 +141,7 @@ public sealed class InMemoryLocalStore<TDocument> : ILocalStore<TDocument>
         lock (_gate)
         {
             var documents = _records.Values
-                .Where(r => includeDeleted || !r.Current.Deleted)
+                .Where(r => !r.MissingAfterReset && (includeDeleted || !r.Current.Deleted))
                 .Select(r => _clone(r.Current))
                 .ToList();
 
@@ -150,11 +150,80 @@ public sealed class InMemoryLocalStore<TDocument> : ILocalStore<TDocument>
     }
 
     /// <inheritdoc />
-    public Task<Checkpoint> GetCheckpointAsync(CancellationToken cancellationToken = default)
+    public Task<ReplicaCursor> GetCursorAsync(CancellationToken cancellationToken = default)
     {
         lock (_gate)
         {
-            return Task.FromResult(_checkpoint);
+            return Task.FromResult(_cursor);
+        }
+    }
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<SyncRecord<TDocument>>> GetConflictsAsync(int limit, CancellationToken cancellationToken = default)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+        lock (_gate)
+        {
+            var conflicts = _records.Values
+                .Where(static r => r.Conflict is not null)
+                .OrderBy(static r => r.Current.Id, StringComparer.Ordinal)
+                .Take(limit)
+                .Select(CloneRecord)
+                .ToList();
+            return Task.FromResult<IReadOnlyList<SyncRecord<TDocument>>>(conflicts);
+        }
+    }
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<SyncRecord<TDocument>>> GetRejectedAsync(int limit, CancellationToken cancellationToken = default)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+        lock (_gate)
+        {
+            var rejected = _records.Values
+                .Where(static r => r.Rejection is not null)
+                .OrderBy(static r => r.Current.Id, StringComparer.Ordinal)
+                .Take(limit)
+                .Select(CloneRecord)
+                .ToList();
+            return Task.FromResult<IReadOnlyList<SyncRecord<TDocument>>>(rejected);
+        }
+    }
+
+    /// <inheritdoc />
+    public Task<int> PurgeAsync(IReadOnlyList<string> ids, long generation, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(ids);
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (_gate)
+        {
+            var removed = 0;
+            foreach (var id in ids)
+            {
+                if (_records.TryGetValue(id, out var record) && !record.IsDirty && record.Conflict is null && record.Generation < generation && _records.Remove(id))
+                {
+                    removed++;
+                }
+            }
+
+            return Task.FromResult(removed);
+        }
+    }
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<SyncRecord<TDocument>>> GetStaleAsync(long generation, int limit, CancellationToken cancellationToken = default)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+        lock (_gate)
+        {
+            var stale = _records.Values
+                .Where(r => !r.IsDirty && !r.MissingAfterReset && r.Generation < generation)
+                .OrderBy(static r => r.Current.Id, StringComparer.Ordinal)
+                .Take(limit)
+                .Select(CloneRecord)
+                .ToList();
+
+            return Task.FromResult<IReadOnlyList<SyncRecord<TDocument>>>(stale);
         }
     }
 
@@ -186,6 +255,7 @@ public sealed class InMemoryLocalStore<TDocument> : ILocalStore<TDocument>
             Current = _clone(record.Current),
             Base = record.Base is { } b ? _clone(b) : null,
             Observed = record.Observed is { } o ? _clone(o) : null,
+            Conflict = record.Conflict is { } c ? c with { Server = _clone(c.Server), Local = _clone(c.Local), Base = c.Base is { } cb ? _clone(cb) : null } : null,
             Pending = record.Pending is { } p ? p with { Payload = _clone(p.Payload) } : null,
         };
 }

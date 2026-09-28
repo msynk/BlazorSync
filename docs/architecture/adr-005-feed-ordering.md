@@ -38,6 +38,15 @@ and test:
 Required tests before claiming I06: delayed lower-sequence commit (T27), rollback gap (T28), multiple
 application instances (T30), server restart.
 
+## Restores and epochs (implemented, 2026-09-27)
+
+- An authority whose history may have been lost starts a new epoch and continues its version sequence
+  above anything the lost history may have issued (`InMemorySyncServerOptions.VersionFloor`, restore via
+  `CreateBackup`/`RestoreFrom`). Receipts in the backup are kept.
+- Replicas reset with a generation counter and a resnapshot (`docs/protocol/v1.md` §6.1). Without the
+  version rule, a pending operation's base version could match a different state after a restore and
+  overwrite it silently; `ResetTests.EditOnLostVersionConflicts` covers this.
+
 ## Retention
 
 Tombstones and receipts are retained indefinitely by the reference authority. A retention horizon and

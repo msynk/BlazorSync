@@ -219,7 +219,7 @@ public sealed class PushProtocolTests
         await other.Engine.WriteAsync(new Note { Id = "hot", Title = "0" });
         await other.Engine.SyncAsync();
 
-        var client = new TestReplica(server, "a", options: new SyncOptions<Note> { MaxConflictRetries = 2, PushBatchSize = 1 });
+        var client = new TestReplica(server, "a", new ClientWinsConflictHandler<Note>(), new SyncOptions<Note> { MaxConflictRetries = 2, PushBatchSize = 1 });
         await client.Engine.SyncAsync();
         await client.Engine.WriteAsync(new Note { Id = "hot", Title = "mine" });
         await client.Engine.WriteAsync(new Note { Id = "zz-cold", Title = "cold" });
@@ -379,7 +379,8 @@ public sealed class PushProtocolTests
         var server = new Server.InMemorySyncServer<Note>(NoteJson.ServerOptions(maxOperationsPerPush: 2));
         var ops = Enumerable.Range(0, 3).Select(i => new PushOperation<Note>($"op{i}", $"n{i}", null, new Note { Id = $"n{i}" })).ToList();
 
-        Assert.Throws<ArgumentException>(() => server.Push(new PushRequest<Note>(ops)));
+        var error = Assert.Throws<SyncTransportException>(() => server.Push(new PushRequest<Note>(ops)));
+        Assert.Equal(SyncErrorCodes.PayloadTooLarge, error.ErrorCode);
         Assert.Empty(server.Snapshot());
     }
 }

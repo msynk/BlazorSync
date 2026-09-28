@@ -9,6 +9,8 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.TestHost" Version="10.0.12" />
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" Version="10.10.0" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
     <PackageReference Include="xunit" Version="2.9.2" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
@@ -20,6 +22,13 @@
 
   <ItemGroup>
     <ProjectReference Include="..\BlazorSync\BlazorSync.csproj" />
+    <ProjectReference Include="..\BlazorSync.Storage.Sqlite\BlazorSync.Storage.Sqlite.csproj" />
+    <ProjectReference Include="..\BlazorSync.Tests.CrashHost\BlazorSync.Tests.CrashHost.csproj" />
+    <ProjectReference Include="..\BlazorSync.Transport.Http\BlazorSync.Transport.Http.csproj" />
+    <ProjectReference Include="..\BlazorSync.Server.AspNetCore\BlazorSync.Server.AspNetCore.csproj" />
+    <ProjectReference Include="..\BlazorSync.Testing\BlazorSync.Testing.csproj" />
+    <ProjectReference Include="..\BlazorSync.Blazor\BlazorSync.Blazor.csproj" />
+    <ProjectReference Include="..\BlazorSync.Storage.IndexedDb\BlazorSync.Storage.IndexedDb.csproj" />
   </ItemGroup>
 
 </Project>

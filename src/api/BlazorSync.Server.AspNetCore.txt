@@ -1,0 +1,10 @@
+sealed class BlazorSync.Server.AspNetCore.SyncEndpointOptions
+  System.Collections.Generic.IReadOnlySet<System.String> SupportedSchemas { get; init; }
+  System.Func<Microsoft.AspNetCore.Http.HttpContext, System.String> ResolveScope { get; init; }
+  System.Int64 MaxRequestBodyBytes { get; init; }
+  ctor()
+static class BlazorSync.Server.AspNetCore.SyncEndpoints
+  const System.String MeterName = "BlazorSync.Server"
+  const System.String ProtocolVersion = "1"
+  static Microsoft.AspNetCore.Routing.RouteGroupBuilder MapSyncCollection<TDocument>(Microsoft.AspNetCore.Routing.IEndpointRouteBuilder endpoints, System.String collection, BlazorSync.Server.ISyncAuthority<TDocument> authority, BlazorSync.Protocol.SyncJsonTypes<TDocument> json, BlazorSync.Server.AspNetCore.SyncEndpointOptions options, System.String prefix = "sync") where TDocument : class, BlazorSync.ISyncEntity
+  static System.TimeSpan HintKeepAlive { get; set; }

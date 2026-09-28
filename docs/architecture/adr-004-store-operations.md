@@ -37,6 +37,25 @@ page and its checkpoint could be persisted separately.
   current state; once an operation is persisted it is immutable and resent unchanged until final. A later
   edit is sent as the next operation after the first is acknowledged.
 
+## Providers (2026-09-27)
+
+- `InMemoryLocalStore`: reference, not durable.
+- `SqliteLocalStore` (`BlazorSync.Storage.Sqlite`): one `BEGIN IMMEDIATE` transaction per update, WAL,
+  `synchronous=FULL` by default, JSON documents via `JsonTypeInfo<T>`, ordinal id ordering through a
+  UTF-16BE key column, schema version in `PRAGMA user_version` (newer schemas refused), replica id and
+  incarnation. Passes the shared conformance suite with one instance and with two instances on one file,
+  and the process-kill tests.
+- The contract gained a replica cursor (checkpoint + generation + resnapshot flag) and `GetStaleAsync`
+  for the reset flow (ADR-005, protocol §6.1).
+- `IndexedDbLocalStore` (`BlazorSync.Storage.IndexedDb`): optimistic read-compute-conditional-write per
+  update in one readwrite transaction (ADR-008).
+- Phase 8 (2026-09-28): stores persist `SyncRecord.Conflict` and list conflicts by id
+  (`GetConflictsAsync(limit)`); `PurgeAsync(ids, generation)` physically removes clean records of older
+  generations without a kept conflict, for scope-change and retention resets; the cursor carries a
+  `PurgeMissing` flag so an interrupted purge sweep resumes with the same meaning. SQLite and IndexedDB are
+  at schema 2; both upgrade schema 1 in place without touching existing rows (tested with a pending
+  operation in each).
+
 ## Consequences
 
 - Durable providers must implement `UpdateAsync` as one database transaction (SQLite) or one readwrite

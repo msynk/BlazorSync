@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <Description>Sample: a Blazor Web App showing one notes component in static SSR, Interactive Server, Interactive WebAssembly and Auto (in-memory authority).</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.Server" Version="10.0.12" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\BlazorSync.Samples.WebApp.Client\BlazorSync.Samples.WebApp.Client.csproj" />
+    <ProjectReference Include="..\BlazorSync.Samples.Shared\BlazorSync.Samples.Shared.csproj" />
+    <ProjectReference Include="..\BlazorSync.Blazor\BlazorSync.Blazor.csproj" />
+    <ProjectReference Include="..\BlazorSync.Server.AspNetCore\BlazorSync.Server.AspNetCore.csproj" />
+  </ItemGroup>
+
+</Project>

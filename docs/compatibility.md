@@ -8,7 +8,88 @@
   domain schema versioned independently (ADR-011); a documented client/server compatibility window.
 - Behavioural changes count as breaking even when signatures do not change.
 
-## Unreleased (Phase 2: wire encoding, conformance, AOT)
+## Unreleased (Phase 10: operations and packaging)
+
+| Change | Why | Migration |
+|---|---|---|
+| Traces and metrics: `BlazorSync.Diagnostics.SyncDiagnostics` (`SourceName` "BlazorSync", `NameTag`); `SyncOptions<T>.DiagnosticsName` (must not be empty; default the document type name). | Observability (docs/operations/observability.md). | Additive; nothing is emitted without a listener. |
+| `SyncSessionOptions<T>.Logger`; `BlazorSync.Blazor` references `Microsoft.Extensions.Logging.Abstractions` 10.0.12 explicitly; the DI recipes pass the container's logger factory. | Session logs. | Additive. |
+| **Behaviour:** an unexpected exception in the session loop (a store, serializer or application failure) now reports `AttentionRequired`, is logged, and is retried after `MaxBackoff` or on `RequestSync`. Before, it ended the loop silently and the status stayed `Syncing`. | Found while adding logging. | None; apps that watched for a stuck `Syncing` state can rely on `AttentionRequired`. |
+| **Behaviour:** an unexpected exception from the authority in `MapSyncCollection` endpoints is answered with `503` and code `unavailable`, and logged. Before, it propagated to the host (usually a bare 500). `SyncEndpoints.MeterName` added. | Clients retry `unavailable`; details stay in server logs. | Authorities that relied on exception middleware to shape responses map their errors to `SyncTransportException` instead. |
+| Package metadata for the seven libraries (`src/Directory.Build.props` and `.targets`): version `0.1.0-preview`, MIT, repository links, README, symbols (snupkg), deterministic builds. The demo, samples, tests and benchmarks are not packable. | Phase 10 packaging. Nothing is published. | None. |
+| Public API baselines in `src/api/*.txt`, checked by `PublicApiTests`. | API review (ADR-011). | Update with `BLAZORSYNC_UPDATE_API=1` after review. |
+
+## Unreleased (Phase 9: recovery)
+
+| Change | Why | Migration |
+|---|---|---|
+| `ILocalStore.GetRejectedAsync(limit)`. | List parked rejections (I19). | Custom stores implement it; run `LocalStoreConformance.Cases`. |
+| `SyncEngine.GetRejectedAsync`, `RetryRejectedAsync`, `RevertAsync`, `ExportLocalChangesAsync`, `ImportLocalChangesAsync`. | Stuck-queue tooling and moving local work (ADR-013). | Additive. |
+| `ISyncCollection<T>.RetryAsync`, `RevertAsync`. | Same, for components. | Custom `ISyncCollection` implementations add the methods. |
+| `SqliteStoreRecovery.CheckAsync`, `RebuildAsync`, `SqliteRebuildReport`. | Damaged SQLite replicas. | Additive. |
+| SQLite schema DDL moved to an internal `SqliteSchema` class; `SqliteLocalStore.SchemaVersion` is unchanged (2). | Shared by the store and the rebuild. | None. |
+
+## Unreleased (Phase 8: conflicts, selective sync, retention)
+
+| Change | Why | Migration |
+|---|---|---|
+| **Default conflict policy is now `DeferConflictHandler`** (was `ClientWins`): the replica shows the server state and keeps the local change as an unresolved conflict. | ADR-006: the old default silently overwrote concurrent edits. | Behavioural. To keep the old behaviour pass `new ClientWinsConflictHandler<T>()`. Otherwise surface conflicts (`GetConflictsAsync`) or use `ThreeWayMergeConflictHandler<T>`. With the default, `SyncResult.Conflicts` counts kept conflicts and the run is complete without pushing them. |
+| `ConflictOutcome.Defer`, `ConflictResolution.Defer()`, `SyncRecord.Conflict`, `SyncConflict<T>`; `SyncEngine.GetConflictsAsync`, `ResolveConflictAsync`, `DiscardConflictAsync`. | Durable unresolved conflicts (I11). | Switch statements over `ConflictOutcome` need a new case. |
+| `ThreeWayMerge`, `ThreeWayMergeResult<T>`, `ThreeWayMergeConflictHandler<T>`. | Field-level merge. | Additive. |
+| `ILocalStore`: `GetConflictsAsync(limit)` and `PurgeAsync(ids, generation)` added; `ReplicaCursor` gained `PurgeMissing`; stores persist `SyncRecord.Conflict` and never purge dirty or conflicted records. | Conflicts, scope removal. | Custom stores implement both methods, persist the new fields and run `LocalStoreConformance.Cases`. |
+| SQLite store schema 2 (conflict columns and index), IndexedDB schema 2 (conflict index). Both upgrade in place on first open and keep pending work. | Persisted conflicts. | Forward only: after the upgrade an older application refuses the database (`SqliteStoreSchemaException`; IndexedDB reports `outdated`). Ship the upgrade to every tab/process of an app together. |
+| `SyncResetRequiredException.Reason` and `ResetReasons` (`epoch`, `scope-changed`, `expired`); the HTTP problem for `reset-required` carries `reason`; `SyncResult.PurgedAfterReset`. | Revocation and retention must remove data from the device; a restore must not. | Clients that do not understand `reason` treat it as `epoch` (records hidden, not removed). |
+| `PushErrorCodes.BaseExpired` (`base-expired`); on it the engine clears the record's base, so writing again recreates the document. | A long-offline edit must not resurrect a purged document. | Handle the rejection like other rejections (show it; the user writes again to restore). |
+| `InMemorySyncServerOptions.ScopeFingerprint`; `InMemorySyncServer.PurgeTombstones`, `PurgeReceipts`, `PurgedThrough`; backups include the retention horizon. Checkpoints now have the form `{epoch}~{scope}:{position}`. | Selective sync and bounded retention. | Checkpoints in the previous `{epoch}:{position}` form are answered with `reset-required` (`epoch`), so replicas resnapshot once after the server update. |
+| `ISyncCollection<T>`: `GetConflictsAsync`, `ResolveConflictAsync`, `DiscardConflictAsync`; `SyncDocumentConflict<T>`; `SyncItemState.Conflicted`. | Conflicts in the component API. | Custom `ISyncCollection` implementations add the methods. |
+| `SqliteStorePool.Release(dataSource)`. | Close pooled connections of one database file without `SqliteConnection.ClearAllPools()`, which disrupts other databases in the process. | Additive. |
+| `SyncEngine.DeleteAsync` no longer mutates the stored record's document instance inside the store transform. | Transforms must be pure (ADR-004). | None. |
+
+## Unreleased (session lifecycle and hints)
+
+| Change | Why | Migration |
+|---|---|---|
+| `ISyncCollection.GetItemStatusAsync`, `SyncItemStatus`, `SyncItemState`; `SyncState.Paused`. | Per-item confirmation (I16). | Custom `ISyncCollection` implementations add the method. |
+| `SyncSessionOptions`: `LiveHints`, `AttachLifecycle`, `RenewCredentials`; `SyncSession`: `Pause`, `Resume`, `NotifyLocalWriteAsync`, `LiveHints`. | Phase 7. | Additive. |
+| `LocalSyncCollection` updates `Status.Pending` immediately after a local write (it previously lagged until the next sync). | Found by a flaky browser test; the UI showed "0 unsynced" for queued work. | None. |
+| `MapSyncCollection` maps `GET …/hints` (SSE) when the authority implements `ISyncCommitNotifier`; `HttpSyncTransport.StreamAsync` reads it. | Hints. | Service workers must not proxy `/sync/` requests (see protocol §8). |
+| `AddBrowserSyncCollection` enables hints and attaches an `online`/visibility watcher (`BrowserLifecycleWatcher`). | Prompt sync in browsers. | Additive. |
+
+## Blazor integration
+
+| Change | Why | Migration |
+|---|---|---|
+| New package `BlazorSync.Blazor`: `ISyncCollection<T>`, `SyncQuery<T>`, `SyncWriteResult`, `SyncCapabilities`, `SyncStatus`, `SyncSession<T>`, `SyncSessionOptions<T>` (record), `LocalSyncCollection<T>`, `ServerSyncCollection<T>`, `AddServerSyncCollection`, `AddLocalSyncCollection`. | Phase 6. | Additive. |
+| `BlazorSync.Storage.IndexedDb` now references `BlazorSync.Blazor` and adds `AddBrowserSyncCollection`. | Browser recipe. | Additive. |
+| Core: `ISyncDocumentReader<T>`, `StoredDocument<T>`, `ISyncCommitNotifier`, `AuthorityCommit`; implemented by `InMemorySyncServer` and `ScopedAuthority`. | Server-connected reads and hints. | Custom authorities implement them to support server-connected hosts. |
+| Samples: `Note` moved to `BlazorSync.Samples.Shared`; the notes PWA uses the shared `NotesPanel` and the browser recipe; new Blazor Web App sample. | One component in every render mode. | Samples only. |
+
+## Browser storage, samples
+
+| Change | Why | Migration |
+|---|---|---|
+| `ReplicaIdentity` moved from `BlazorSync.Storage.Sqlite` to `BlazorSync.Storage` (core). | Shared by SQLite and IndexedDB. | Code inside `BlazorSync.Storage.Sqlite` resolves it unchanged; others add `using BlazorSync.Storage;`. |
+| `LocalStoreUnavailableException` added (core). | Provider-neutral storage failures. | Additive. |
+| Store conformance cases moved to `BlazorSync.Testing` (`LocalStoreConformance`, `ConformanceDocument`, `Check`). | Run the same cases in browsers. | Custom providers run `LocalStoreConformance.Cases`. |
+| New packages `BlazorSync.Storage.IndexedDb` and `BlazorSync.Testing`; samples `BlazorSync.Samples.Notes.Client/Server`. | Phase 5. | Additive. |
+
+## Reset/resnapshot, SQLite store, change observation
+
+| Change | Why | Migration |
+|---|---|---|
+| `ILocalStore.GetCheckpointAsync` replaced by `GetCursorAsync` returning `ReplicaCursor` (checkpoint, generation, resnapshot); `UpdateAsync` takes `ReplicaCursor?` instead of `Checkpoint?`; `GetStaleAsync` added; `QueryAsync` must hide records marked missing. | Reset flow (I14). | Custom stores persist the three cursor fields atomically with updates and implement `GetStaleAsync`; run `LocalStoreConformanceTests`. |
+| `SyncRecord` gained `Generation` and `MissingAfterReset`. | Same. | Stores persist both. |
+| On `SyncResetRequiredException` from a non-start checkpoint the engine now resets and resnapshots instead of failing. | Same. | Check `SyncResult.ResetPerformed` / `MissingAfterReset` if the app wants to tell the user. |
+| `InMemorySyncServer`: `CreateBackup`, `HighestVersion`; options `RestoreFrom`, `VersionFloor`. | Restore simulation, version rule. | Additive. |
+| `SyncEngine.Observe`, `SyncChange`, `SyncChangeKind` added. | Post-commit observation. | Additive. |
+| New package project `BlazorSync.Storage.Sqlite` (depends on Microsoft.Data.Sqlite 10.0.12). | Durable native store. | Additive; not for WebAssembly. |
+| `ISyncAuthority<T>`, `SyncCallContext`, `AuthorityLimits`, `ScopedAuthority<T>`; `InMemorySyncServer` implements `ISyncAuthority<T>` and gained `CanRead`/`CanWrite` options. | One authority for HTTP and in-process callers (I18), scopes (I07). | Additive. |
+| `InProcessTransport` takes any `ISyncAuthority<T>` and an optional `SyncCallContext`. | Same. | Existing calls with an `InMemorySyncServer` still compile. |
+| `InMemorySyncServer.Push` throws `SyncTransportException` (`payload-too-large`) instead of `ArgumentException` for too many operations; `Pull` throws `SyncProtocolException` for a limit below 1. | Maps to HTTP 413/400. | Catch the new types. |
+| `SyncTransportException`, `SyncErrorCodes`, `SyncJsonTypes<T>` added. | Classified transport errors, shared JSON metadata. | Additive. |
+| New package projects `BlazorSync.Server.AspNetCore` and `BlazorSync.Transport.Http`. | HTTP binding. | Additive. |
+
+## Phase 2: wire encoding, conformance, AOT
 
 | Change | Why | Migration |
 |---|---|---|

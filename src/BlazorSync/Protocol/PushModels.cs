@@ -143,4 +143,10 @@ public static class PushErrorCodes
 
     /// <summary>The server is temporarily unable to decide.</summary>
     public const string Unavailable = "unavailable";
+
+    /// <summary>
+    /// The operation is based on a version older than the server's retention horizon and the document no longer
+    /// exists (it may have been deleted and purged). Writing it again as a new document is an explicit choice.
+    /// </summary>
+    public const string BaseExpired = "base-expired";
 }

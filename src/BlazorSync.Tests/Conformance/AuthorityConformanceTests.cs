@@ -207,6 +207,17 @@ public abstract class AuthorityConformanceTests
         Assert.Equal(["b"], next.Changes.Select(c => c.Document.Id));
     }
 
+    [Fact(DisplayName = "Authority I14: a write based on a version the authority does not have is accepted when the document does not exist")]
+    public async Task BaseVersionForMissingDocument()
+    {
+        // A replica's pending edit may be based on state a restore lost; it must not be stranded.
+        var authority = Create();
+        var outcome = (await Push(authority, Op("o1", "restored-away", 41, "pending edit")))[0];
+
+        Assert.Equal(PushOutcomeKind.Accepted, outcome.Kind);
+        Assert.True(outcome.Version > 0);
+    }
+
     [Fact(DisplayName = "Authority I14: a checkpoint issued by another authority requires reset")]
     public async Task ForeignCheckpoint()
     {

@@ -1,6 +1,6 @@
 # ADR-007: Hosting profiles, application API, DI lifetimes and lifecycle
 
-- **Status:** Proposed; implementation in Phases 6 and 7 (2026-09-27)
+- **Status:** Accepted; implemented for browser, server-connected and request profiles (`BlazorSync.Blazor`, 2026-09-28). Native Hybrid hosts: recipe available (`AddLocalSyncCollection` + SQLite), no MAUI/WPF sample yet.
 - **Invariants:** I07, I13, I15, I16, I18
 
 ## Context
@@ -36,7 +36,33 @@ Host profiles, each with explicit capabilities rather than pretended equivalence
 
 The core stays renderer-agnostic. Server and browser DI containers are never assumed to share memory.
 
-## Tests (to be written)
+## Implementation (2026-09-28)
 
-T46–T50 (prerender, Auto first/later visit, dirty local vs snapshot, circuit recreation, disposal during
-callback), T39 (account switch during flight).
+- `ISyncCollection<T>`: get, bounded in-memory query (`SyncQuery`: filter, order, limit ≤ 1000),
+  save/delete returning `SyncWriteResult` (`SavedLocally`, `AcceptedByServer`, `Conflict`, `Rejected`,
+  `NotFound`), `Subscribe` (disposable), `Status`, `Capabilities`.
+- `LocalSyncCollection<T>` over `SyncSession<T>`: lazily opens the replica for the resolved account (never
+  during prerendering: the server's container never contains it); switching account stops the previous
+  loop and waits for it before the next replica opens. The session loop syncs on request, on an interval
+  and after local writes; exponential backoff with jitter; `Retry-After` is not shortened by requests;
+  follower (no lease) never replicates; status `Starting`, `Synced`, `Syncing`, `Offline`, `Follower`,
+  `AttentionRequired`, `Stopped`.
+- `ServerSyncCollection<T>` (scoped per circuit/request): in-process reads/writes as the authenticated user
+  (`AuthenticationStateProvider`); writes use the version the instance last read (an unseen document is
+  written as new, so it cannot be silently overwritten); conflicts surface immediately; commit hints from the
+  authority refresh other circuits in the same scope; queries refuse to scan beyond 10,000 documents.
+- Recipes: `AddServerSyncCollection` (server), `AddLocalSyncCollection` (native/any local store; refuses
+  to register in an ASP.NET Core container), `AddBrowserSyncCollection` (IndexedDB + Web Locks lease).
+- Prerendered HTML comes from the server collection; after activation the WebAssembly component shows the
+  local replica. Nothing from the prerendered state is imported into the replica, so a dirty replica can
+  never be overwritten by it (T48).
+
+## Tests
+
+Unit: `BlazorIntegrationTests` (16, fake time): local save → upload → `Synced`; backoff growth and triggers;
+`Retry-After`; follower; account switch with an in-flight sync; attention states; stop; server-collection
+conflicts, unseen-version protection, delete, scopes and read authorization, live hints and unsubscribe,
+queries, DI guard, scoped recipe. Browser (Playwright, Chromium/Firefox/WebKit, published sample server
+process): static SSR without JavaScript (T46), prerender without JavaScript, Interactive Server live updates
+and circuit recreation (T49), WebAssembly writes reaching Server users, Auto first visit on the server and
+later visit in WebAssembly (T47), prerender not overwriting unsynced local edits (T48).
