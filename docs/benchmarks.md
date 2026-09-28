@@ -1,14 +1,14 @@
 # Benchmarks
 
 Measurements of the [ADR-012](architecture/adr-012-packaging-and-support.md) workloads with BenchmarkDotNet
-(`src/BlazorSync.Benchmarks`). They were recorded on one development machine in short runs. Treat them as orders
+(`src/Bsync.Benchmarks`). They were recorded on one development machine in short runs. Treat them as orders
 of magnitude and as a baseline for regressions, not as performance claims for any device.
 
 ```bash
-dotnet run -c Release --project src/BlazorSync.Benchmarks -- --filter "*LocalWrite*" "*LocalRead*" "*Merge*" --job short
-dotnet run -c Release --project src/BlazorSync.Benchmarks -- --filter "*Reconnect*"
-dotnet run -c Release --project src/BlazorSync.Benchmarks -- --filter "*InitialPull*"
-dotnet run -c Release --project src/BlazorSync.Benchmarks -- --filter "*ScalePull*"
+dotnet run -c Release --project src/Bsync.Benchmarks -- --filter "*LocalWrite*" "*LocalRead*" "*Merge*" --job short
+dotnet run -c Release --project src/Bsync.Benchmarks -- --filter "*Reconnect*"
+dotnet run -c Release --project src/Bsync.Benchmarks -- --filter "*InitialPull*"
+dotnet run -c Release --project src/Bsync.Benchmarks -- --filter "*ScalePull*"
 ```
 
 ## Recorded run (2026-09-28)

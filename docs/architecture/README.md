@@ -48,5 +48,5 @@ Operations: [disaster recovery and stuck replicas](../operations/disaster-recove
 - Push: operations (id, base version, payload) → one outcome per id: accepted, conflict, rejected (incl.
   `base-expired`), retry-later; duplicates are replayed from receipts.
 - Conflicts: kept by default (`Defer`), or merged field by field, or decided by a policy (ADR-006).
-- Diagnostics: `BlazorSync` activity source and meter, `BlazorSync.Server` meter, `ILogger` in session and
+- Diagnostics: `Bsync` activity source and meter, `Bsync.Server` meter, `ILogger` in session and
   endpoints (docs/operations/observability.md).

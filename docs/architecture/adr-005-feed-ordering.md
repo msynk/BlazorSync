@@ -48,7 +48,7 @@ Candidate 2 (serialized allocation) was chosen for v1, per feed (collection and 
   version of that feed has committed or rolled back, and a rolled-back version is reused, never skipped.
 - Writers of different feeds do not wait for each other.
 
-Evidence (`BlazorSync.Tests.PostgreSql`, PostgreSQL 17.6):
+Evidence (`Bsync.Tests.PostgreSql`, PostgreSQL 17.6):
 - `DelayedCommitIsNeverSkipped`: T27 and T28 with a real uncommitted transaction.
 - `ConcurrentInstancesKeepCommittedPrefix`: T30, with 12 writers on two instances and a continuous reader.
   Removing the lock makes this test fail.

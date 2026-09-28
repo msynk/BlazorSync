@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Bsync browser tests</title>
+    <base href="/" />
+</head>
+<body>
+    <p id="status">loading</p>
+    <script>
+        // Called by the .NET side once the runtime is up, so the test driver knows it can invoke methods.
+        window.bsyncHarnessStarted = () => {
+            window.bsyncReady = true;
+            document.getElementById("status").textContent = "ready";
+        };
+    </script>
+    <script src="_framework/blazor.webassembly.js"></script>
+</body>
+</html>

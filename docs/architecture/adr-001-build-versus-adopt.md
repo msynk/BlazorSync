@@ -6,7 +6,7 @@
 
 ## Context
 
-BlazorSync's goal is offline-first document replication for .NET applications across Blazor
+Bsync's goal is offline-first document replication for .NET applications across Blazor
 WebAssembly, Server, Auto, static SSR and Hybrid hosts, with a portable core usable by headless .NET.
 Before investing in a native protocol, we compared existing systems on licence, maintenance, .NET/Blazor
 WebAssembly support, local store, replication model and backend requirements.

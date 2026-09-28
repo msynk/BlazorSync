@@ -17,20 +17,20 @@ Phase 0 and Phase 1 (with the first part of Phase 2).
 
 ## Layout at the reviewed commit
 
-- Solution: `src/BlazorSync.slnx`.
-- Projects: `src/BlazorSync` (library, `net10.0`, no package dependencies, warnings as errors),
-  `src/BlazorSync.Tests` (xUnit), `src/BlazorSync.Demo` (standalone Blazor WebAssembly).
-- The README described `samples/BlazorSync.Demo` and `tests/BlazorSync.Tests`, which do not exist on
-  disk; `dotnet run --project samples/BlazorSync.Demo` failed. Fixed in this change.
+- Solution: `src/Bsync.slnx`.
+- Projects: `src/Bsync` (library, `net10.0`, no package dependencies, warnings as errors),
+  `src/Bsync.Tests` (xUnit), `src/Bsync.Demo` (standalone Blazor WebAssembly).
+- The README described `samples/Bsync.Demo` and `tests/Bsync.Tests`, which do not exist on
+  disk; `dotnet run --project samples/Bsync.Demo` failed. Fixed in this change.
 
 ## Commands and results at the reviewed commit
 
 Run from `src/`:
 
 ```bash
-dotnet build BlazorSync.slnx -c Release          # succeeded, 0 warnings
-dotnet test BlazorSync.slnx -c Release --no-build # 18 passed (6 clock, 4 conflict, 8 engine)
-dotnet publish BlazorSync.Demo -c Release -o <dir> # succeeded (WASM relink with wasm-tools)
+dotnet build Bsync.slnx -c Release          # succeeded, 0 warnings
+dotnet test Bsync.slnx -c Release --no-build # 18 passed (6 clock, 4 conflict, 8 engine)
+dotnet publish Bsync.Demo -c Release -o <dir> # succeeded (WASM relink with wasm-tools)
 ```
 
 Not verified at the baseline: explicit WASM AOT publish, running the published app in a browser.
@@ -41,8 +41,8 @@ The ten scenarios were recreated as *desired-behaviour* tests against the review
 on `0083a02`. The source is kept, uncompiled, at
 [`characterization/BaselineCharacterizationTests.cs.txt`](characterization/BaselineCharacterizationTests.cs.txt).
 
-To reproduce: `git checkout 0083a02`, copy that file to `src/BlazorSync.Tests/BaselineCharacterizationTests.cs`,
-and run `dotnet test src/BlazorSync.Tests -c Release --filter FullyQualifiedName~BaselineCharacterization`.
+To reproduce: `git checkout 0083a02`, copy that file to `src/Bsync.Tests/BaselineCharacterizationTests.cs`,
+and run `dotnet test src/Bsync.Tests -c Release --filter FullyQualifiedName~BaselineCharacterization`.
 
 Deterministic interleavings are injected with a store decorator that runs a local edit between the
 engine's read and its write of the same record, and a transport decorator that drops a response after the
@@ -91,7 +91,7 @@ the fix.
 
 See the "Building and testing" section of the README for commands. At the end of this change:
 
-- `dotnet build src/BlazorSync.slnx -c Release`: 0 warnings, 0 errors.
-- `dotnet test src/BlazorSync.slnx -c Release`: 152 tests passed, 0 failed (the 18 original tests are
+- `dotnet build src/Bsync.slnx -c Release`: 0 warnings, 0 errors.
+- `dotnet test src/Bsync.slnx -c Release`: 152 tests passed, 0 failed (the 18 original tests are
   kept; one assertion changed as documented in `docs/compatibility.md`).
 - Demo publish: see the verification table in `docs/support-matrix.md`.

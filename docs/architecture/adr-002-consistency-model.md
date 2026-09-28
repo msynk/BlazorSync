@@ -18,7 +18,7 @@ concurrency token, the pull cursor and the LWW input, which made LWW results dep
 
 ## Decision
 
-BlazorSync guarantees, and only guarantees:
+Bsync guarantees, and only guarantees:
 
 - **Atomic local writes.** A local write of one document commits (state + pending intent) atomically.
 - **Per-document server concurrency.** The server accepts an operation only if its base version equals

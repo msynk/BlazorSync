@@ -1,14 +1,14 @@
 using System.Runtime.CompilerServices;
-using BlazorSync.Clocks;
-using BlazorSync.Conflicts;
-using BlazorSync.Protocol;
-using BlazorSync.Server;
-using BlazorSync.Storage;
-using BlazorSync.Tests.TestSupport;
-using BlazorSync.Transport;
+using Bsync.Clocks;
+using Bsync.Conflicts;
+using Bsync.Protocol;
+using Bsync.Server;
+using Bsync.Storage;
+using Bsync.Tests.TestSupport;
+using Bsync.Transport;
 using Xunit;
 
-namespace BlazorSync.Tests;
+namespace Bsync.Tests;
 
 // Desired-behaviour tests for the ten baseline scenarios, written against the API of commit 0083a02.
 public sealed class BaselineCharacterizationTests

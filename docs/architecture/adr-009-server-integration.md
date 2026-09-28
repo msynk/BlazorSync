@@ -1,6 +1,6 @@
 # ADR-009: Server integration and change capture
 
-- **Status:** Accepted; PostgreSQL authority implemented with Npgsql (`BlazorSync.Server.PostgreSql`, 2026-09-28)
+- **Status:** Accepted; PostgreSQL authority implemented with Npgsql (`Bsync.Server.PostgreSql`, 2026-09-28)
 - **Invariants:** I04, I05, I06, I18
 
 ## Context
@@ -21,7 +21,7 @@ ordinary API endpoints, background jobs, admin tools, raw SQL.
 
 - v1 uses (1). The same service is called by the HTTP endpoints and by in-process callers (Blazor Server,
   background jobs), so authorization and validation are identical (I18).
-- One relational provider first: **PostgreSQL** via EF Core (`BlazorSync.Server.EntityFrameworkCore`),
+- One relational provider first: **PostgreSQL** via EF Core (`Bsync.Server.EntityFrameworkCore`),
   chosen for transactional DDL, `xid8`/snapshot functions usable for the feed watermark (ADR-005),
   robust unique constraints for receipts, and wide hosting availability. SQL Server is the likely second
   provider.

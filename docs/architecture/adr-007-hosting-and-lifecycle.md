@@ -1,7 +1,7 @@
 # ADR-007: Hosting profiles, application API, DI lifetimes and lifecycle
 
 - **Status:** Accepted; implemented for every profile. The browser, server-connected and request profiles are
-  covered by `BlazorSync.Blazor`. The native profile has WPF and .NET MAUI (Windows) Blazor Hybrid samples, each
+  covered by `Bsync.Blazor`. The native profile has WPF and .NET MAUI (Windows) Blazor Hybrid samples, each
   with SQLite, HTTP, pause/resume on minimize/background, and an automated UI test (2026-09-28).
 - **Invariants:** I07, I13, I15, I16, I18
 
@@ -26,7 +26,7 @@ Host profiles, each with explicit capabilities rather than pretended equivalence
 - The application-facing API is a small **collection facade** (get, bounded query, write/delete
   returning a receipt, observe) and a **session** (start, stop, reconcile now, status, dispose). Receipts
   and status carry a capability-aware confirmation level so components need not know the host.
-- DI: explicit registration per profile (`AddBlazorSyncBrowser`, `AddBlazorSyncServer`, …), no runtime
+- DI: explicit registration per profile (`AddBsyncBrowser`, `AddBsyncServer`, …), no runtime
   guessing. Server: circuit-scoped facade, request-scoped operations, `IDbContextFactory`, singletons only
   for stateless or partitioned infrastructure. Browser/native: session scoped to the authenticated account.
 - Prerender never touches JS storage or persists replicas, credentials or cursors into HTML. A bounded

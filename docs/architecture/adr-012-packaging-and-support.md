@@ -7,9 +7,9 @@
 - **Target framework:** `net10.0` only. .NET 10 is the current LTS release (see ADR-001 sources for the
   lifecycle dates checked). Adding older targets requires a demonstrated user need and CI coverage.
 - **Packages are split only when a real boundary exists** (a dependency that must not flow into another
-  host). Planned order: `BlazorSync` (core, dependency-free) → `BlazorSync.Storage.Sqlite` →
-  `BlazorSync.Server` + `BlazorSync.Server.AspNetCore` + `BlazorSync.Server.EntityFrameworkCore` →
-  `BlazorSync.Transport.Http` → `BlazorSync.Storage.IndexedDb` → `BlazorSync.Blazor` → `BlazorSync.Testing`.
+  host). Planned order: `Bsync` (core, dependency-free) → `Bsync.Storage.Sqlite` →
+  `Bsync.Server` + `Bsync.Server.AspNetCore` + `Bsync.Server.EntityFrameworkCore` →
+  `Bsync.Transport.Http` → `Bsync.Storage.IndexedDb` → `Bsync.Blazor` → `Bsync.Testing`.
   Native database binaries must never enter the WebAssembly dependency graph; server code must never
   enter the client bundle.
 - **Support tiers** published in `docs/support-matrix.md`:

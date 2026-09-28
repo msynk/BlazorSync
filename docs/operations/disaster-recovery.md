@@ -1,6 +1,6 @@
 # Disaster recovery and stuck replicas
 
-This runbook is for people who operate a BlazorSync deployment or support its users. Each section says
+This runbook is for people who operate a Bsync deployment or support its users. Each section says
 what is implemented and tested today, and what is not. The design is recorded in
 [ADR-013](../architecture/adr-013-recovery.md).
 
@@ -138,7 +138,7 @@ whether to grant it.
   `SqliteStoreSchemaException`, IndexedDB `outdated`).
 - Do not let two app versions share one database file. In browsers, a newer tab closes older tabs' connections.
 
-**Domain schema** (`BlazorSync-Schema` header). To roll out a new document shape:
+**Domain schema** (`Bsync-Schema` header). To roll out a new document shape:
 
 1. Deploy a server that accepts both ids (`SupportedSchemas = { "notes-v1", "notes-v2" }`) and whose
    documents are readable by both app versions.
@@ -158,6 +158,6 @@ With the PostgreSQL authority:
 - A backup schedule, and a tested restore that starts a new epoch with a version floor.
 - A receipt retention period longer than the longest supported offline period.
 - A tombstone retention period, with users told what happens to devices offline for longer.
-- Monitoring of rejected and conflicted counts per replica, and of `blazorsync.server.requests{result="unavailable"}`
+- Monitoring of rejected and conflicted counts per replica, and of `bsync.server.requests{result="unavailable"}`
   (docs/operations/observability.md).
 - Uploads drained before changing a document's shape (ADR-013), or both shapes readable during the roll-out.

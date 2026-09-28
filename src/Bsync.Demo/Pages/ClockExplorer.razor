@@ -1,0 +1,127 @@
+@page "/clock"
+
+<PageTitle>Clock Explorer · Bsync</PageTitle>
+
+<div class="page-head">
+    <h1>Hybrid Logical Clock Explorer</h1>
+    <p class="lede">
+        Bsync stamps every write with a Hybrid Logical Clock (HLC): a wall-clock millisecond plus
+        a logical counter and a node id. It stays strictly monotonic even when two events land in the
+        same millisecond, and it advances past timestamps received from other nodes — giving a
+        deterministic causal order without trusting any single device's clock.
+    </p>
+</div>
+
+<div class="clock-grid">
+    <div class="clock-card" style="--accent:@DisplayHelpers.ColorFor("node-a")">
+        <h3>Node A</h3>
+        <div class="clock-now"><HlcBadge Timestamp="_lastA" /></div>
+        <button class="btn" @onclick="TickA">Local event on A</button>
+    </div>
+
+    <div class="clock-transfer">
+        <button class="btn ghost" @onclick="SendAToB">Send A → B ▶</button>
+        <button class="btn ghost" @onclick="SendBToA">◀ Send B → A</button>
+        <p class="hint">"Send" simulates A's write arriving at B: B calls <code>Update</code> and produces a timestamp that causally follows A's.</p>
+    </div>
+
+    <div class="clock-card" style="--accent:@DisplayHelpers.ColorFor("node-b")">
+        <h3>Node B</h3>
+        <div class="clock-now"><HlcBadge Timestamp="_lastB" /></div>
+        <button class="btn" @onclick="TickB">Local event on B</button>
+    </div>
+</div>
+
+<div class="toolbar">
+    <button class="btn ghost" @onclick="BurstA">5 rapid events on A (same millisecond)</button>
+    <button class="btn ghost danger" @onclick="Reset">Reset clocks</button>
+</div>
+
+<div class="timeline">
+    <h3>Timeline (newest first)</h3>
+    @if (_events.Count == 0)
+    {
+        <div class="empty">Generate some events to see how the counters move.</div>
+    }
+    <table class="master-table">
+        <thead><tr><th>#</th><th>Action</th><th>Resulting timestamp</th><th>Wall</th><th>Counter</th></tr></thead>
+        <tbody>
+            @foreach (var e in _events)
+            {
+                <tr>
+                    <td>@e.Seq</td>
+                    <td>@e.Action</td>
+                    <td><HlcBadge Timestamp="e.Stamp" /></td>
+                    <td>@e.Stamp.WallTime</td>
+                    <td>@e.Stamp.Counter</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+</div>
+
+@code {
+    private HybridLogicalClock _a = new("node-a");
+    private HybridLogicalClock _b = new("node-b");
+    private HlcTimestamp _lastA = HlcTimestamp.MinValue;
+    private HlcTimestamp _lastB = HlcTimestamp.MinValue;
+    private readonly List<TimelineEvent> _events = new();
+    private int _seq;
+
+    private void TickA()
+    {
+        _lastA = _a.Now();
+        Record("A: local event", _lastA);
+    }
+
+    private void TickB()
+    {
+        _lastB = _b.Now();
+        Record("B: local event", _lastB);
+    }
+
+    private void SendAToB()
+    {
+        if (_lastA.WallTime == 0)
+        {
+            TickA();
+        }
+
+        _lastB = _b.Update(_lastA);
+        Record("B: received from A", _lastB);
+    }
+
+    private void SendBToA()
+    {
+        if (_lastB.WallTime == 0)
+        {
+            TickB();
+        }
+
+        _lastA = _a.Update(_lastB);
+        Record("A: received from B", _lastA);
+    }
+
+    private void BurstA()
+    {
+        for (var i = 0; i < 5; i++)
+        {
+            _lastA = _a.Now();
+            Record("A: burst event", _lastA);
+        }
+    }
+
+    private void Reset()
+    {
+        _a = new HybridLogicalClock("node-a");
+        _b = new HybridLogicalClock("node-b");
+        _lastA = _lastB = HlcTimestamp.MinValue;
+        _events.Clear();
+        _seq = 0;
+    }
+
+    private void Record(string action, HlcTimestamp stamp) =>
+        _events.Insert(0, new TimelineEvent(++_seq, action, stamp));
+
+    private sealed record TimelineEvent(int Seq, string Action, HlcTimestamp Stamp);
+}

@@ -1,6 +1,6 @@
 # ADR-008: Browser storage
 
-- **Status:** Accepted and implemented (`BlazorSync.Storage.IndexedDb`, 2026-09-27)
+- **Status:** Accepted and implemented (`Bsync.Storage.IndexedDb`, 2026-09-27)
 - **Invariants:** I01, I02, I03, I14
 
 ## Context
@@ -54,7 +54,7 @@ across Chromium, Firefox and WebKit, with multiple tabs.
 
 ## Tests
 
-`BlazorSync.Tests.Browser` (Playwright) runs, in Chromium, Firefox and WebKit builds: the shared store
+`Bsync.Tests.Browser` (Playwright) runs, in Chromium, Firefox and WebKit builds: the shared store
 conformance cases; offline edits across a tab reload and convergence with a second browser profile; an
 acknowledgement in one tab never cleaning another tab's newer edit; 40 concurrent writes from two tabs
 yielding exactly revisions 1..40 (a mutation removing the stamp check fails it); lease exclusivity and

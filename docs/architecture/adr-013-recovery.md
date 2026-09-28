@@ -9,7 +9,7 @@ A replica can get stuck or damaged in ways the replication protocol does not rep
 
 - a change the server rejected stays parked until someone acts on it;
 - a user wants to drop an unsynchronized change;
-- a SQLite file is damaged (bad storage, a copy taken mid-write, a bug outside BlazorSync);
+- a SQLite file is damaged (bad storage, a copy taken mid-write, a bug outside Bsync);
 - local work must move to a new store (a rebuilt file, a new device).
 
 In every case the priority is the same as everywhere else: never lose or duplicate the user's

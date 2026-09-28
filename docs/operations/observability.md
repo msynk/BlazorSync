@@ -1,6 +1,6 @@
 # Observability
 
-BlazorSync emits traces and metrics through the .NET built-ins (`ActivitySource`, `Meter`). It emits logs
+Bsync emits traces and metrics through the .NET built-ins (`ActivitySource`, `Meter`). It emits logs
 through `ILogger` in the packages that already depend on Microsoft.Extensions: the Blazor session and the
 ASP.NET Core endpoints. The core package takes no logging dependency.
 
@@ -11,34 +11,34 @@ error codes, collection names and the engine's diagnostics name.
 
 ```csharp
 builder.Services.AddOpenTelemetry()
-    .WithTracing(t => t.AddSource(SyncDiagnostics.SourceName))                        // "BlazorSync"
-    .WithMetrics(m => m.AddMeter(SyncDiagnostics.SourceName, SyncEndpoints.MeterName)); // + "BlazorSync.Server"
+    .WithTracing(t => t.AddSource(SyncDiagnostics.SourceName))                        // "Bsync"
+    .WithMetrics(m => m.AddMeter(SyncDiagnostics.SourceName, SyncEndpoints.MeterName)); // + "Bsync.Server"
 ```
 
 Give each engine a low-cardinality name with `SyncOptions<T>.DiagnosticsName`, for example the collection
 name. The default is the document type name.
 
-## Client engine (`BlazorSync` meter and activity source)
+## Client engine (`Bsync` meter and activity source)
 
 | Instrument | Type | Unit | Tags | Meaning |
 |---|---|---|---|---|
-| `blazorsync.push.operations` | counter | operations | `blazorsync.name`, `blazorsync.outcome` (`accepted`, `conflict`, `rejected`, `retry-later`, `missing`), `blazorsync.duplicate`, `error.type` for rejections | Every operation sent and what the server answered. `missing` means the response omitted it (resent later). |
-| `blazorsync.pull.changes` | counter | changes | `blazorsync.name` | Server changes applied locally. |
-| `blazorsync.conflicts` | counter | conflicts | `blazorsync.name`, `blazorsync.decision` (`use-master`, `use-resolved`, `keep-fork`, `defer`) | Conflict handler decisions. |
-| `blazorsync.resets` | counter | resets | `blazorsync.name`, `blazorsync.reason` (`epoch`, `scope-changed`, `expired`) | Replica resets. |
-| `blazorsync.run.duration` | histogram | s | `blazorsync.name`, `blazorsync.operation` (`sync`, `pull`, `push`), `blazorsync.result` (`complete`, `incomplete`, `error`), `error.type` | Duration of replication runs. |
-| `blazorsync.queue.depth` | observable gauge | documents | `blazorsync.name` | Documents with unconfirmed local changes, as of the engine's last run. |
-| `blazorsync.queue.oldest_age` | observable gauge | s | `blazorsync.name` | Age of the oldest change waiting for upload, by its authoring time, as of the last run. |
+| `bsync.push.operations` | counter | operations | `bsync.name`, `bsync.outcome` (`accepted`, `conflict`, `rejected`, `retry-later`, `missing`), `bsync.duplicate`, `error.type` for rejections | Every operation sent and what the server answered. `missing` means the response omitted it (resent later). |
+| `bsync.pull.changes` | counter | changes | `bsync.name` | Server changes applied locally. |
+| `bsync.conflicts` | counter | conflicts | `bsync.name`, `bsync.decision` (`use-master`, `use-resolved`, `keep-fork`, `defer`) | Conflict handler decisions. |
+| `bsync.resets` | counter | resets | `bsync.name`, `bsync.reason` (`epoch`, `scope-changed`, `expired`) | Replica resets. |
+| `bsync.run.duration` | histogram | s | `bsync.name`, `bsync.operation` (`sync`, `pull`, `push`), `bsync.result` (`complete`, `incomplete`, `error`), `error.type` | Duration of replication runs. |
+| `bsync.queue.depth` | observable gauge | documents | `bsync.name` | Documents with unconfirmed local changes, as of the engine's last run. |
+| `bsync.queue.oldest_age` | observable gauge | s | `bsync.name` | Age of the oldest change waiting for upload, by its authoring time, as of the last run. |
 
 The queue gauges cost two small store reads per run. They are measured only while a listener subscribes to
 them.
 
-Spans: `blazorsync.sync`, `blazorsync.pull` and `blazorsync.push`, with the tags `blazorsync.pulled`,
+Spans: `bsync.sync`, `bsync.pull` and `bsync.push`, with the tags `bsync.pulled`,
 `pushed`, `conflicts`, `rejected`, `deferred`, `reset` and `result`. A failed run has error status and
 `error.type` (the transport error code, `cancelled`, or the exception type). A reset adds a
-`blazorsync.reset` event with its reason.
+`bsync.reset` event with its reason.
 
-## Session (`BlazorSync.SyncSession` log category)
+## Session (`Bsync.SyncSession` log category)
 
 | Event | Level | When |
 |---|---|---|
@@ -49,12 +49,12 @@ Spans: `blazorsync.sync`, `blazorsync.pull` and `blazorsync.push`, with the tags
 The DI recipes (`AddLocalSyncCollection`, `AddBrowserSyncCollection`) use the container's logger factory. Set
 `SyncSessionOptions.Logger` to override it.
 
-## Server endpoints (`BlazorSync.Server` meter and log category)
+## Server endpoints (`Bsync.Server` meter and log category)
 
 | Instrument | Tags | Meaning |
 |---|---|---|
-| `blazorsync.server.requests` | `blazorsync.collection`, `blazorsync.endpoint` (`pull`, `push`, `hints`), `blazorsync.result` (`ok` or a problem code) | Every protocol request. |
-| `blazorsync.server.push.operations` | `blazorsync.collection`, `blazorsync.outcome`, `blazorsync.duplicate` | Operations decided by the authority. |
+| `bsync.server.requests` | `bsync.collection`, `bsync.endpoint` (`pull`, `push`, `hints`), `bsync.result` (`ok` or a problem code) | Every protocol request. |
+| `bsync.server.push.operations` | `bsync.collection`, `bsync.outcome`, `bsync.duplicate` | Operations decided by the authority. |
 
 Logs:
 
@@ -67,13 +67,13 @@ ASP.NET Core's own `http.server.*` metrics and request logs cover transport-leve
 
 ## What to alert on
 
-- `blazorsync.queue.oldest_age` growing on devices you collect telemetry from: uploads are not getting through.
-- `blazorsync.push.operations{outcome="rejected"}` by `error.type`: validation or permission problems, or
+- `bsync.queue.oldest_age` growing on devices you collect telemetry from: uploads are not getting through.
+- `bsync.push.operations{outcome="rejected"}` by `error.type`: validation or permission problems, or
   `clock-skew` on devices with a wrong clock.
-- `blazorsync.conflicts{decision="defer"}`: conflicts waiting for users.
-- `blazorsync.resets` by reason, which is expected after a restore or a permission change and suspicious
+- `bsync.conflicts{decision="defer"}`: conflicts waiting for users.
+- `bsync.resets` by reason, which is expected after a restore or a permission change and suspicious
   otherwise.
-- `blazorsync.server.requests{result="unavailable"}` together with `SyncAuthorityFailed` logs.
+- `bsync.server.requests{result="unavailable"}` together with `SyncAuthorityFailed` logs.
 
 ## Evidence
 

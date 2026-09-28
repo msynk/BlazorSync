@@ -2,7 +2,7 @@
 
 ## Policy
 
-- BlazorSync is pre-1.0 and has not been published as a package. Minor versions may contain breaking
+- Bsync is pre-1.0 and has not been published as a package. Minor versions may contain breaking
   changes. Every breaking change is listed below with a migration path.
 - From 1.0: semantic versioning; public API compatibility checked in CI; wire protocol, store schema and
   domain schema versioned independently (ADR-011); a documented client/server compatibility window.
@@ -12,7 +12,7 @@
 
 | Change | Why | Migration |
 |---|---|---|
-| New package `BlazorSync.Server.PostgreSql` (`PostgreSqlSyncAuthority<T>`, `PostgreSqlSyncAuthorityOptions<T>`, `PostgreSqlSchemaException`; Npgsql 10.0.3). One instance serves every scope; the tables are created on first use. | Durable authority (Phase 4). | Additive. The notes sample server uses it when `BlazorSync:PostgreSql` is configured. |
+| New package `Bsync.Server.PostgreSql` (`PostgreSqlSyncAuthority<T>`, `PostgreSqlSyncAuthorityOptions<T>`, `PostgreSqlSchemaException`; Npgsql 10.0.3). One instance serves every scope; the tables are created on first use. | Durable authority (Phase 4). | Additive. The notes sample server uses it when `Bsync:PostgreSql` is configured. |
 | **Protocol (additive):** optional `group`/`groupSize` on push operations, optional `features` on pull responses, outcome code `group-aborted` (with `retry-later`); replica-only codes `group-failed`, `groups-unsupported` (`PushErrorCodes`, `SyncFeatures`). | Dependency groups (protocol §4.1). | Older authorities never receive groups: replicas send them only to authorities that advertise `groups`. |
 | The in-memory authority's operation fingerprint now includes `group` and `groupSize`. | A replay must match the whole request. | Only in-memory state existed; a receipt stored by an earlier build would answer `operation-id-reused`. |
 | `SyncEngine.WriteGroupAsync`, `ISyncCollection.SaveAllAsync`; `SyncRecord.Group`, `SyncGroup`; `PendingOperation.Group`/`GroupSize`. | Dependency groups. | Custom `ISyncCollection` implementations add `SaveAllAsync`; custom stores persist the new fields. |
@@ -20,18 +20,18 @@
 | `ILocalStore.QueryPageAsync`; `SyncEngine.QueryPageAsync`. `LocalSyncCollection.QueryAsync` with the default order reads bounded pages instead of the whole collection. | Bounded queries. | Custom stores implement `QueryPageAsync` (conformance case added). |
 | `ThreeWayMergeOptions` (set and counter members), new `ThreeWayMerge.Merge` overload, `ThreeWayMergeConflictHandler` takes options. | Semantic merges. | Additive. |
 | `DocumentUpgrade.TryTake`. | Upgrading old document shapes on read (ADR-013). | Additive. |
-| Samples: `BlazorSync.Samples.Hybrid.Wpf` (in the solution) and `BlazorSync.Samples.Hybrid.Maui` (Windows target; outside the solution because it needs the `maui-windows` workload). | Native hosts (ADR-007). | Samples only. |
+| Samples: `Bsync.Samples.Hybrid.Wpf` (in the solution) and `Bsync.Samples.Hybrid.Maui` (Windows target; outside the solution because it needs the `maui-windows` workload). | Native hosts (ADR-007). | Samples only. |
 
 ## Unreleased (Phase 10: operations and packaging)
 
 | Change | Why | Migration |
 |---|---|---|
-| Traces and metrics: `BlazorSync.Diagnostics.SyncDiagnostics` (`SourceName` "BlazorSync", `NameTag`); `SyncOptions<T>.DiagnosticsName` (must not be empty; default the document type name). | Observability (docs/operations/observability.md). | Additive; nothing is emitted without a listener. |
-| `SyncSessionOptions<T>.Logger`; `BlazorSync.Blazor` references `Microsoft.Extensions.Logging.Abstractions` 10.0.12 explicitly; the DI recipes pass the container's logger factory. | Session logs. | Additive. |
+| Traces and metrics: `Bsync.Diagnostics.SyncDiagnostics` (`SourceName` "Bsync", `NameTag`); `SyncOptions<T>.DiagnosticsName` (must not be empty; default the document type name). | Observability (docs/operations/observability.md). | Additive; nothing is emitted without a listener. |
+| `SyncSessionOptions<T>.Logger`; `Bsync.Blazor` references `Microsoft.Extensions.Logging.Abstractions` 10.0.12 explicitly; the DI recipes pass the container's logger factory. | Session logs. | Additive. |
 | **Behaviour:** an unexpected exception in the session loop (a store, serializer or application failure) now reports `AttentionRequired`, is logged, and is retried after `MaxBackoff` or on `RequestSync`. Before, it ended the loop silently and the status stayed `Syncing`. | Found while adding logging. | None; apps that watched for a stuck `Syncing` state can rely on `AttentionRequired`. |
 | **Behaviour:** an unexpected exception from the authority in `MapSyncCollection` endpoints is answered with `503` and code `unavailable`, and logged. Before, it propagated to the host (usually a bare 500). `SyncEndpoints.MeterName` added. | Clients retry `unavailable`; details stay in server logs. | Authorities that relied on exception middleware to shape responses map their errors to `SyncTransportException` instead. |
 | Package metadata for the seven libraries (`src/Directory.Build.props` and `.targets`): version `0.1.0-preview`, MIT, repository links, README, symbols (snupkg), deterministic builds. The demo, samples, tests and benchmarks are not packable. | Phase 10 packaging. Nothing is published. | None. |
-| Public API baselines in `src/api/*.txt`, checked by `PublicApiTests`. | API review (ADR-011). | Update with `BLAZORSYNC_UPDATE_API=1` after review. |
+| Public API baselines in `src/api/*.txt`, checked by `PublicApiTests`. | API review (ADR-011). | Update with `BSYNC_UPDATE_API=1` after review. |
 
 ## Unreleased (Phase 9: recovery)
 
@@ -73,19 +73,19 @@
 
 | Change | Why | Migration |
 |---|---|---|
-| New package `BlazorSync.Blazor`: `ISyncCollection<T>`, `SyncQuery<T>`, `SyncWriteResult`, `SyncCapabilities`, `SyncStatus`, `SyncSession<T>`, `SyncSessionOptions<T>` (record), `LocalSyncCollection<T>`, `ServerSyncCollection<T>`, `AddServerSyncCollection`, `AddLocalSyncCollection`. | Phase 6. | Additive. |
-| `BlazorSync.Storage.IndexedDb` now references `BlazorSync.Blazor` and adds `AddBrowserSyncCollection`. | Browser recipe. | Additive. |
+| New package `Bsync.Blazor`: `ISyncCollection<T>`, `SyncQuery<T>`, `SyncWriteResult`, `SyncCapabilities`, `SyncStatus`, `SyncSession<T>`, `SyncSessionOptions<T>` (record), `LocalSyncCollection<T>`, `ServerSyncCollection<T>`, `AddServerSyncCollection`, `AddLocalSyncCollection`. | Phase 6. | Additive. |
+| `Bsync.Storage.IndexedDb` now references `Bsync.Blazor` and adds `AddBrowserSyncCollection`. | Browser recipe. | Additive. |
 | Core: `ISyncDocumentReader<T>`, `StoredDocument<T>`, `ISyncCommitNotifier`, `AuthorityCommit`; implemented by `InMemorySyncServer` and `ScopedAuthority`. | Server-connected reads and hints. | Custom authorities implement them to support server-connected hosts. |
-| Samples: `Note` moved to `BlazorSync.Samples.Shared`; the notes PWA uses the shared `NotesPanel` and the browser recipe; new Blazor Web App sample. | One component in every render mode. | Samples only. |
+| Samples: `Note` moved to `Bsync.Samples.Shared`; the notes PWA uses the shared `NotesPanel` and the browser recipe; new Blazor Web App sample. | One component in every render mode. | Samples only. |
 
 ## Browser storage, samples
 
 | Change | Why | Migration |
 |---|---|---|
-| `ReplicaIdentity` moved from `BlazorSync.Storage.Sqlite` to `BlazorSync.Storage` (core). | Shared by SQLite and IndexedDB. | Code inside `BlazorSync.Storage.Sqlite` resolves it unchanged; others add `using BlazorSync.Storage;`. |
+| `ReplicaIdentity` moved from `Bsync.Storage.Sqlite` to `Bsync.Storage` (core). | Shared by SQLite and IndexedDB. | Code inside `Bsync.Storage.Sqlite` resolves it unchanged; others add `using Bsync.Storage;`. |
 | `LocalStoreUnavailableException` added (core). | Provider-neutral storage failures. | Additive. |
-| Store conformance cases moved to `BlazorSync.Testing` (`LocalStoreConformance`, `ConformanceDocument`, `Check`). | Run the same cases in browsers. | Custom providers run `LocalStoreConformance.Cases`. |
-| New packages `BlazorSync.Storage.IndexedDb` and `BlazorSync.Testing`; samples `BlazorSync.Samples.Notes.Client/Server`. | Phase 5. | Additive. |
+| Store conformance cases moved to `Bsync.Testing` (`LocalStoreConformance`, `ConformanceDocument`, `Check`). | Run the same cases in browsers. | Custom providers run `LocalStoreConformance.Cases`. |
+| New packages `Bsync.Storage.IndexedDb` and `Bsync.Testing`; samples `Bsync.Samples.Notes.Client/Server`. | Phase 5. | Additive. |
 
 ## Reset/resnapshot, SQLite store, change observation
 
@@ -96,12 +96,12 @@
 | On `SyncResetRequiredException` from a non-start checkpoint the engine now resets and resnapshots instead of failing. | Same. | Check `SyncResult.ResetPerformed` / `MissingAfterReset` if the app wants to tell the user. |
 | `InMemorySyncServer`: `CreateBackup`, `HighestVersion`; options `RestoreFrom`, `VersionFloor`. | Restore simulation, version rule. | Additive. |
 | `SyncEngine.Observe`, `SyncChange`, `SyncChangeKind` added. | Post-commit observation. | Additive. |
-| New package project `BlazorSync.Storage.Sqlite` (depends on Microsoft.Data.Sqlite 10.0.12). | Durable native store. | Additive; not for WebAssembly. |
+| New package project `Bsync.Storage.Sqlite` (depends on Microsoft.Data.Sqlite 10.0.12). | Durable native store. | Additive; not for WebAssembly. |
 | `ISyncAuthority<T>`, `SyncCallContext`, `AuthorityLimits`, `ScopedAuthority<T>`; `InMemorySyncServer` implements `ISyncAuthority<T>` and gained `CanRead`/`CanWrite` options. | One authority for HTTP and in-process callers (I18), scopes (I07). | Additive. |
 | `InProcessTransport` takes any `ISyncAuthority<T>` and an optional `SyncCallContext`. | Same. | Existing calls with an `InMemorySyncServer` still compile. |
 | `InMemorySyncServer.Push` throws `SyncTransportException` (`payload-too-large`) instead of `ArgumentException` for too many operations; `Pull` throws `SyncProtocolException` for a limit below 1. | Maps to HTTP 413/400. | Catch the new types. |
 | `SyncTransportException`, `SyncErrorCodes`, `SyncJsonTypes<T>` added. | Classified transport errors, shared JSON metadata. | Additive. |
-| New package projects `BlazorSync.Server.AspNetCore` and `BlazorSync.Transport.Http`. | HTTP binding. | Additive. |
+| New package projects `Bsync.Server.AspNetCore` and `Bsync.Transport.Http`. | HTTP binding. | Additive. |
 
 ## Phase 2: wire encoding, conformance, AOT
 
@@ -113,7 +113,7 @@
 | `SyncOptions.Cloner` removed. The engine has a reflection constructor (annotated `[RequiresUnreferencedCode]`) and a new constructor taking `Func<T, T> cloner`. | ADR-011: no hidden reflection. | `new SyncEngine<T>(store, transport, clock, cloner, handler, options)`; for JSON use `DocumentCloner.Json(context.T)`. |
 | `InMemoryLocalStore()` (reflection) and `InMemoryLocalStore(Func<T,T>)` are separate constructors; the parameterless one is annotated. | Same. | Pass a cloner in trimmed apps. |
 | `InMemorySyncServer(string, Func<T,T>?)` replaced by an annotated `InMemorySyncServer(string serverId = "server")`; `InMemorySyncServerOptions.Cloner` and `Fingerprint` are `required`. | Same; the demo's Conflict Lab was silently using reflection fingerprints. | Use the options constructor with `DocumentCloner.Json`/`JsonFingerprint`. |
-| `DocumentCloner.Json(JsonTypeInfo<T>)` and `DocumentCloner.JsonFingerprint(JsonTypeInfo<T>)` added; `BlazorSync` is marked `IsAotCompatible`. | AOT-safe helpers. | Additive. |
+| `DocumentCloner.Json(JsonTypeInfo<T>)` and `DocumentCloner.JsonFingerprint(JsonTypeInfo<T>)` added; `Bsync` is marked `IsAotCompatible`. | AOT-safe helpers. | Additive. |
 | `InMemoryLocalStore.UpdateAsync` returns a fresh copy of the committed record for unchanged entries (previously the transform's working copy). | Found by the store conformance suite. | None. |
 
 ## Phase 1 and first part of Phase 2

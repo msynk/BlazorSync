@@ -40,14 +40,14 @@ page and its checkpoint could be persisted separately.
 ## Providers (2026-09-27)
 
 - `InMemoryLocalStore`: reference, not durable.
-- `SqliteLocalStore` (`BlazorSync.Storage.Sqlite`): one `BEGIN IMMEDIATE` transaction per update, WAL,
+- `SqliteLocalStore` (`Bsync.Storage.Sqlite`): one `BEGIN IMMEDIATE` transaction per update, WAL,
   `synchronous=FULL` by default, JSON documents via `JsonTypeInfo<T>`, ordinal id ordering through a
   UTF-16BE key column, schema version in `PRAGMA user_version` (newer schemas refused), replica id and
   incarnation. Passes the shared conformance suite with one instance and with two instances on one file,
   and the process-kill tests.
 - The contract gained a replica cursor (checkpoint + generation + resnapshot flag) and `GetStaleAsync`
   for the reset flow (ADR-005, protocol §6.1).
-- `IndexedDbLocalStore` (`BlazorSync.Storage.IndexedDb`): optimistic read-compute-conditional-write per
+- `IndexedDbLocalStore` (`Bsync.Storage.IndexedDb`): optimistic read-compute-conditional-write per
   update in one readwrite transaction (ADR-008).
 - Phase 8 (2026-09-28): stores persist `SyncRecord.Conflict` and list conflicts by id
   (`GetConflictsAsync(limit)`); `PurgeAsync(ids, generation)` physically removes clean records of older

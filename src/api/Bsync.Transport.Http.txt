@@ -1,0 +1,12 @@
+sealed class Bsync.Transport.Http.HttpSyncTransportOptions
+  System.String BasePath { get; init; }
+  System.String Collection { get; init; }
+  System.String SchemaId { get; init; }
+  System.TimeSpan RequestTimeout { get; init; }
+  ctor()
+sealed class Bsync.Transport.Http.HttpSyncTransport<TDocument> : Bsync.Transport.ISyncTransport<TDocument> where TDocument : class, Bsync.ISyncEntity
+  System.Collections.Generic.IAsyncEnumerable<Bsync.Protocol.StreamEvent<TDocument>> StreamAsync(Bsync.Checkpoint since, System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<Bsync.Protocol.PullResult<TDocument>> PullAsync(Bsync.Protocol.PullRequest request, System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<Bsync.Protocol.PushResult<TDocument>> PushAsync(Bsync.Protocol.PushRequest<TDocument> request, System.Threading.CancellationToken cancellationToken = default)
+  const System.String ProtocolVersion = "1"
+  ctor(System.Net.Http.HttpClient http, Bsync.Transport.Http.HttpSyncTransportOptions options, Bsync.Protocol.SyncJsonTypes<TDocument> json)

@@ -22,7 +22,7 @@
 ## Current state
 
 - The JSON encoding is normative in `docs/protocol/v1.md` and enforced by strict converters in
-  `BlazorSync.Protocol` (`WireInt64JsonConverter`, `HlcTimestampJsonConverter`, `CheckpointJsonConverter`,
+  `Bsync.Protocol` (`WireInt64JsonConverter`, `HlcTimestampJsonConverter`, `CheckpointJsonConverter`,
   `PushOutcomeKindJsonConverter`) and by valid/invalid fixtures.
 - Reflection-based defaults are annotated with `[RequiresUnreferencedCode]`/`[RequiresDynamicCode]`; the
   library is `IsAotCompatible` and builds without warnings; trim-safe overloads take delegates or

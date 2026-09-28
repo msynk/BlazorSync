@@ -1,0 +1,34 @@
+sealed class Bsync.Storage.IndexedDb.BrowserLifecycleWatcher : System.IAsyncDisposable
+  System.Threading.Tasks.ValueTask DisposeAsync()
+  System.Void Wake()
+  static System.Threading.Tasks.Task<Bsync.Storage.IndexedDb.BrowserLifecycleWatcher> StartAsync(Microsoft.JSInterop.IJSRuntime js, System.Action wake, System.Threading.CancellationToken cancellationToken = default)
+sealed class Bsync.Storage.IndexedDb.IndexedDbLocalStore<TDocument> : Bsync.Storage.ILocalStore<TDocument>, System.IAsyncDisposable where TDocument : class, Bsync.ISyncEntity
+  System.Threading.Tasks.Task<Bsync.Clocks.HlcTimestamp> GetClockHighWaterAsync(System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<Bsync.Storage.ReplicaCursor> GetCursorAsync(System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<Bsync.Storage.ReplicaIdentity> BeginNewIncarnationAsync(System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<Bsync.Storage.ReplicaIdentity> GetReplicaIdentityAsync(System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<Bsync.Storage.SyncRecord<TDocument>> GetAsync(System.String id, System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<System.Boolean> RequestPersistenceAsync(System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<Bsync.Storage.RecordUpdateResult<TDocument>>> UpdateAsync(System.Collections.Generic.IReadOnlyList<Bsync.Storage.RecordUpdate<TDocument>> updates, Bsync.Storage.ReplicaCursor? cursor = null, System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<Bsync.Storage.SyncRecord<TDocument>>> GetConflictsAsync(System.Int32 limit, System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<Bsync.Storage.SyncRecord<TDocument>>> GetPendingAsync(System.Int32 limit, System.Collections.Generic.IReadOnlySet<System.String> exclude = null, System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<Bsync.Storage.SyncRecord<TDocument>>> GetRejectedAsync(System.Int32 limit, System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<Bsync.Storage.SyncRecord<TDocument>>> GetStaleAsync(System.Int64 generation, System.Int32 limit, System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TDocument>> QueryAsync(System.Boolean includeDeleted = false, System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TDocument>> QueryPageAsync(System.String afterId, System.Int32 limit, System.Boolean includeDeleted = false, System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<System.Int32> CountDirtyAsync(System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.Task<System.Int32> PurgeAsync(System.Collections.Generic.IReadOnlyList<System.String> ids, System.Int64 generation, System.Threading.CancellationToken cancellationToken = default)
+  System.Threading.Tasks.ValueTask DisposeAsync()
+  static System.Threading.Tasks.Task DeleteDatabaseAsync(Microsoft.JSInterop.IJSRuntime js, System.String databaseName, System.Threading.CancellationToken cancellationToken = default)
+  static System.Threading.Tasks.Task<Bsync.Storage.IndexedDb.IndexedDbLocalStore<TDocument>> OpenAsync(Microsoft.JSInterop.IJSRuntime js, Bsync.Storage.IndexedDb.IndexedDbStoreOptions options, System.Text.Json.Serialization.Metadata.JsonTypeInfo<TDocument> typeInfo, System.Threading.CancellationToken cancellationToken = default)
+sealed class Bsync.Storage.IndexedDb.IndexedDbReplicaLease : System.IAsyncDisposable
+  System.Threading.Tasks.ValueTask DisposeAsync()
+  static System.Threading.Tasks.Task<Bsync.Storage.IndexedDb.IndexedDbReplicaLease> TryAcquireAsync(Microsoft.JSInterop.IJSRuntime js, System.String name, System.Threading.CancellationToken cancellationToken = default)
+sealed class Bsync.Storage.IndexedDb.IndexedDbStoreOptions
+  System.Int32 MaxCommitAttempts { get; init; }
+  System.String Collection { get; init; }
+  System.String DatabaseName { get; init; }
+  System.TimeSpan BlockedTimeout { get; init; }
+  ctor()
+static class Bsync.Storage.IndexedDb.IndexedDbSyncServiceCollectionExtensions
+  static Microsoft.Extensions.DependencyInjection.IServiceCollection AddBrowserSyncCollection<TDocument>(Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.String collection, System.Text.Json.Serialization.Metadata.JsonTypeInfo<TDocument> documentType, System.Func<System.IServiceProvider, System.String, Bsync.Transport.ISyncTransport<TDocument>> transport, System.Func<System.IServiceProvider, System.Threading.CancellationToken, System.Threading.Tasks.Task<System.String>> resolveAccount = null, System.Func<Bsync.Blazor.SyncSessionOptions<TDocument>, Bsync.Blazor.SyncSessionOptions<TDocument>> configure = null) where TDocument : class, Bsync.ISyncEntity

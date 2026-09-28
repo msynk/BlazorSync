@@ -1,0 +1,54 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <Description>Browser tests (Playwright: Chromium, Firefox, WebKit) for the IndexedDB store and the WebAssembly + HTTP slice. Downloads Playwright browsers on first run.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
+    <PackageReference Include="Microsoft.Playwright" Version="1.63.0" />
+    <PackageReference Include="Npgsql" Version="10.0.3" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Bsync.Server.AspNetCore\Bsync.Server.AspNetCore.csproj" />
+    <ProjectReference Include="..\Bsync.Testing\Bsync.Testing.csproj" />
+    <!-- Built and published (not referenced) so the tests can serve the WebAssembly harness. -->
+    <ProjectReference Include="..\Bsync.Tests.BrowserHost\Bsync.Tests.BrowserHost.csproj" ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true" />
+    <ProjectReference Include="..\Bsync.Samples.Notes.Server\Bsync.Samples.Notes.Server.csproj" ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true" />
+    <ProjectReference Include="..\Bsync.Samples.WebApp\Bsync.Samples.WebApp.csproj" ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true" />
+    <ProjectReference Include="..\Bsync.Samples.Hybrid.Wpf\Bsync.Samples.Hybrid.Wpf.csproj" ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true" Condition="'$(OS)' == 'Windows_NT'" />
+    <!-- Built only where the maui-windows workload is installed: dotnet test -p:BuildMauiSample=true -->
+    <ProjectReference Include="..\Bsync.Samples.Hybrid.Maui\Bsync.Samples.Hybrid.Maui.csproj" ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true" Condition="'$(OS)' == 'Windows_NT' And '$(BuildMauiSample)' == 'true'" />
+  </ItemGroup>
+
+  <!-- dotnet test -p:BrowserHostAot=true runs the same tests against a WebAssembly AOT build (slow to compile). -->
+  <PropertyGroup>
+    <BrowserHostAot Condition="'$(BrowserHostAot)' == ''">false</BrowserHostAot>
+    <!-- AOT and interpreter builds must not share intermediate outputs: AOT strips IL from assemblies, and an
+         incremental interpreter build would otherwise reuse them (the runtime then fails with "NIY"). -->
+    <BrowserHostFlavor Condition="'$(BrowserHostAot)' == 'true'">aot</BrowserHostFlavor>
+    <BrowserHostFlavor Condition="'$(BrowserHostAot)' != 'true'">interp</BrowserHostFlavor>
+  </PropertyGroup>
+
+  <Target Name="PublishBrowserHost" AfterTargets="Build">
+    <RemoveDir Directories="$(MSBuildProjectDirectory)\$(OutDir)browserhost\" />
+    <MSBuild Projects="..\Bsync.Tests.BrowserHost\Bsync.Tests.BrowserHost.csproj"
+             Targets="Publish"
+             Properties="Configuration=$(Configuration);RunAOTCompilation=$(BrowserHostAot);IntermediateOutputPath=obj\$(Configuration)-$(BrowserHostFlavor)\;OutputPath=bin\$(Configuration)-$(BrowserHostFlavor)\;PublishDir=$(MSBuildProjectDirectory)\$(OutDir)browserhost\" />
+    <MSBuild Projects="..\Bsync.Samples.Notes.Server\Bsync.Samples.Notes.Server.csproj"
+             Targets="Publish"
+             Properties="Configuration=$(Configuration);PublishDir=$(MSBuildProjectDirectory)\$(OutDir)notes-sample\" />
+    <MSBuild Projects="..\Bsync.Samples.WebApp\Bsync.Samples.WebApp.csproj"
+             Targets="Publish"
+             Properties="Configuration=$(Configuration);PublishDir=$(MSBuildProjectDirectory)\$(OutDir)webapp-sample\" />
+  </Target>
+
+</Project>
