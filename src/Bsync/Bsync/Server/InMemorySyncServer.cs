@@ -9,76 +9,6 @@ using Bsync.Protocol;
 
 namespace Bsync.Server;
 
-/// <summary>Configuration for <see cref="InMemorySyncServer{TDocument}"/>.</summary>
-/// <typeparam name="TDocument">The synchronized entity type.</typeparam>
-public sealed class InMemorySyncServerOptions<TDocument>
-    where TDocument : class, ISyncEntity
-{
-    /// <summary>Deep-clone function (for example <c>DocumentCloner.Json(context.MyDocument)</c>).</summary>
-    public required Func<TDocument, TDocument> Cloner { get; init; }
-
-    /// <summary>
-    /// Produces a canonical string for a document, used to detect an operation id reused with a
-    /// different payload (for example <c>DocumentCloner.JsonFingerprint(context.MyDocument)</c>).
-    /// </summary>
-    public required Func<TDocument, string> Fingerprint { get; init; }
-
-    /// <summary>The physical clock used to validate origin timestamps. Defaults to the system clock.</summary>
-    public IPhysicalClock? PhysicalClock { get; init; }
-
-    /// <summary>
-    /// How far a document's origin <see cref="ISyncEntity.UpdatedAt"/> may be ahead of server time before
-    /// the write is rejected with <see cref="PushErrorCodes.ClockSkew"/>. Default five minutes.
-    /// </summary>
-    public TimeSpan MaxClockSkew { get; init; } = TimeSpan.FromMinutes(5);
-
-    /// <summary>Maximum operations accepted in one push request. Default 1000.</summary>
-    public int MaxOperationsPerPush { get; init; } = 1000;
-
-    /// <summary>Maximum changes returned by one pull, regardless of the requested batch size. Default 1000.</summary>
-    public int MaxPageSize { get; init; } = 1000;
-
-    /// <summary>
-    /// A backup to start from (see <see cref="InMemorySyncServer{TDocument}.CreateBackup"/>). The restored
-    /// server gets a new epoch, so replicas holding checkpoints from the original must reset.
-    /// </summary>
-    public InMemorySyncServerBackup<TDocument>? RestoreFrom { get; init; }
-
-    /// <summary>
-    /// The lowest version the server may issue next is <c>VersionFloor + 1</c>. After a restore, set it at or
-    /// above every version the lost history may have issued, so no version is ever reused for a different
-    /// state (docs/protocol/v1.md, section 6).
-    /// </summary>
-    public long VersionFloor { get; init; }
-
-    /// <summary>
-    /// Optional fingerprint of what the caller may see (for example a hash of roles, grants or a filter). It is
-    /// bound into every checkpoint; when it changes, the caller's old checkpoint yields
-    /// <see cref="ResetReasons.ScopeChanged"/> and the replica resnapshots, which removes documents it may no longer
-    /// read and brings back regranted ones even if they did not change.
-    /// </summary>
-    public Func<SyncCallContext, string>? ScopeFingerprint { get; init; }
-
-    /// <summary>
-    /// Optional read authorization. Documents the caller may not read are left out of its pull pages, and
-    /// conflict or replayed outcomes that would reveal such a document are returned as
-    /// <see cref="PushErrorCodes.Forbidden"/> rejections without the document.
-    /// </summary>
-    public Func<SyncCallContext, TDocument, bool>? CanRead { get; init; }
-
-    /// <summary>
-    /// Optional write authorization, checked before validation. Receives the operation and the current
-    /// state (if any). A refused write is rejected with <see cref="PushErrorCodes.Forbidden"/>.
-    /// </summary>
-    public Func<SyncCallContext, PushOperation<TDocument>, TDocument?, bool>? CanWrite { get; init; }
-
-    /// <summary>
-    /// Optional application validation. Return <see langword="null"/> to allow the operation, or an error
-    /// code to reject it permanently. Receives the operation and the current server state, if any.
-    /// </summary>
-    public Func<PushOperation<TDocument>, TDocument?, string?>? Validator { get; init; }
-}
-
 /// <summary>
 /// A reference, in-memory implementation of the server side of the protocol. It is the authoritative
 /// store: it assigns document versions from a single commit sequence, detects conflicts by comparing
@@ -678,31 +608,4 @@ public sealed class InMemorySyncServer<TDocument> : ISyncAuthority<TDocument>, I
     private sealed record Entry(TDocument Document, long Version);
 
     private sealed record Receipt(string Fingerprint, PushOutcome<TDocument> Outcome);
-}
-
-/// <summary>A point-in-time copy of an <see cref="InMemorySyncServer{TDocument}"/>'s state.</summary>
-/// <typeparam name="TDocument">The synchronized entity type.</typeparam>
-public sealed class InMemorySyncServerBackup<TDocument>
-    where TDocument : class, ISyncEntity
-{
-    internal InMemorySyncServerBackup(
-        IReadOnlyDictionary<string, (TDocument Document, long Version)> documents,
-        IReadOnlyDictionary<string, (string Fingerprint, PushOutcome<TDocument> Outcome)> receipts,
-        long sequence,
-        long purgedThrough)
-    {
-        Documents = documents;
-        Receipts = receipts;
-        Sequence = sequence;
-        PurgedThrough = purgedThrough;
-    }
-
-    internal long PurgedThrough { get; }
-
-    internal IReadOnlyDictionary<string, (TDocument Document, long Version)> Documents { get; }
-
-    internal IReadOnlyDictionary<string, (string Fingerprint, PushOutcome<TDocument> Outcome)> Receipts { get; }
-
-    /// <summary>The highest version issued when the backup was taken.</summary>
-    public long Sequence { get; }
 }

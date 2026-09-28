@@ -10,16 +10,6 @@ using Bsync.Transport;
 
 namespace Bsync;
 
-/// <summary>The local commit receipt returned by <see cref="SyncEngine{TDocument}.WriteAsync"/> and <see cref="SyncEngine{TDocument}.DeleteAsync"/>.</summary>
-/// <remarks>
-/// A receipt means the write is committed to the local store (with the durability of that store) and
-/// queued for upload. It says nothing about server acceptance.
-/// </remarks>
-/// <param name="Id">The document id.</param>
-/// <param name="LocalRevision">The local revision created by the write.</param>
-/// <param name="UpdatedAt">The origin timestamp stamped on the stored document.</param>
-public readonly record struct LocalWriteReceipt(string Id, long LocalRevision, HlcTimestamp UpdatedAt);
-
 /// <summary>
 /// Orchestrates replication of a single collection between a local store and a server transport.
 /// </summary>
@@ -1356,21 +1346,3 @@ public sealed class SyncEngine<TDocument>
         }
     }
 }
-
-/// <summary>What caused a <see cref="SyncChange"/>.</summary>
-public enum SyncChangeKind
-{
-    /// <summary>A local write or delete through the engine.</summary>
-    Local = 0,
-
-    /// <summary>State received from the server by pull, or records marked missing after a reset.</summary>
-    Remote = 1,
-
-    /// <summary>Replication metadata: operations prepared, acknowledged, rejected or resolved after a conflict.</summary>
-    Sync = 2,
-}
-
-/// <summary>One committed store transaction that changed records.</summary>
-/// <param name="Kind">What caused the change.</param>
-/// <param name="Ids">The ids of the records that changed, in commit order.</param>
-public sealed record SyncChange(SyncChangeKind Kind, IReadOnlyList<string> Ids);

@@ -1,31 +1,11 @@
 using System.Globalization;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using System.Text.RegularExpressions;
 using Bsync.Clocks;
 using Microsoft.JSInterop;
 
 namespace Bsync.Storage.IndexedDb;
-
-/// <summary>Options for <see cref="IndexedDbLocalStore{TDocument}"/>.</summary>
-public sealed class IndexedDbStoreOptions
-{
-    /// <summary>
-    /// IndexedDB database name. Include the signed-in account (for example <c>bsync-{userId}</c>) so
-    /// different accounts on one browser profile never share a replica.
-    /// </summary>
-    public required string DatabaseName { get; init; }
-
-    /// <summary>Collection name within the database. Default <c>default</c>.</summary>
-    public string Collection { get; init; } = "default";
-
-    /// <summary>How long opening waits for other tabs that block a schema upgrade. Default 10 seconds.</summary>
-    public TimeSpan BlockedTimeout { get; init; } = TimeSpan.FromSeconds(10);
-
-    /// <summary>Maximum optimistic commit attempts when another tab writes the same records concurrently. Default 20.</summary>
-    public int MaxCommitAttempts { get; init; } = 20;
-}
 
 /// <summary>
 /// A durable <see cref="ILocalStore{TDocument}"/> in the browser's IndexedDB, through a small JavaScript
@@ -447,82 +427,3 @@ public sealed partial class IndexedDbLocalStore<TDocument> : ILocalStore<TDocume
     private TDocument Deserialize(string json) =>
         JsonSerializer.Deserialize(json, _typeInfo) ?? throw new InvalidDataException("A stored document deserialized to null.");
 }
-
-/// <summary>Serialized form of one record in IndexedDB. 64-bit numbers are strings.</summary>
-internal sealed class IdbRecord
-{
-    public string Id { get; set; } = string.Empty;
-
-    public string? Stamp { get; set; }
-
-    public string Current { get; set; } = string.Empty;
-
-    public string UpdatedAt { get; set; } = string.Empty;
-
-    public bool Deleted { get; set; }
-
-    public string? Base { get; set; }
-
-    public string? BaseVersion { get; set; }
-
-    public bool IsDirty { get; set; }
-
-    public string LocalRevision { get; set; } = "0";
-
-    public string? PendingId { get; set; }
-
-    public string? PendingRevision { get; set; }
-
-    public string? PendingBaseVersion { get; set; }
-
-    public string? PendingPayload { get; set; }
-
-    public string? RejectionRevision { get; set; }
-
-    public string? RejectionCode { get; set; }
-
-    public string? RejectionMessage { get; set; }
-
-    public string? Observed { get; set; }
-
-    public string? ObservedVersion { get; set; }
-
-    public string Generation { get; set; } = "0";
-
-    public bool Missing { get; set; }
-
-    public string? ConflictServer { get; set; }
-
-    public string? ConflictServerVersion { get; set; }
-
-    public string? ConflictLocal { get; set; }
-
-    public string? ConflictBase { get; set; }
-
-    public string? GroupId { get; set; }
-
-    public List<string>? GroupMembers { get; set; }
-
-    public string? PendingGroup { get; set; }
-
-    public int? PendingGroupSize { get; set; }
-}
-
-internal sealed record IdbCommitEntry(string Id, IdbRecord? Record, string? ExpectedStamp);
-
-internal sealed record IdbCursor(string? Checkpoint, string Generation, bool Resnapshot, bool PurgeMissing);
-
-internal sealed record IdbMetaUpdate(string? HighWater, IdbCursor? Cursor);
-
-internal sealed record IdbRead(List<IdbRecord?> Records, string? HighWater);
-
-internal sealed record IdbMeta(string? Checkpoint, string Generation, bool Resnapshot, bool PurgeMissing, string? HighWater, string? ReplicaId, string? Incarnation);
-
-[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
-[JsonSerializable(typeof(List<IdbCommitEntry>))]
-[JsonSerializable(typeof(IdbMetaUpdate))]
-[JsonSerializable(typeof(IdbRead))]
-[JsonSerializable(typeof(IdbMeta))]
-[JsonSerializable(typeof(List<IdbRecord>))]
-[JsonSerializable(typeof(List<string>))]
-internal sealed partial class IdbJsonContext : JsonSerializerContext;

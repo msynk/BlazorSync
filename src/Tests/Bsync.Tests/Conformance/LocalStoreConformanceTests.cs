@@ -29,9 +29,3 @@ public abstract class LocalStoreConformanceTests
     public Task Conformance(string name) =>
         LocalStoreConformance.Cases.Single(c => c.Name == name).RunAsync(CreateStoreAsync);
 }
-
-public sealed class InMemoryLocalStoreConformanceTests : LocalStoreConformanceTests
-{
-    protected override Task<ILocalStore<ConformanceDocument>> CreateStoreAsync() =>
-        Task.FromResult<ILocalStore<ConformanceDocument>>(new InMemoryLocalStore<ConformanceDocument>(Documents.DocumentCloner.Json(ConformanceJsonContext.Default.ConformanceDocument)));
-}

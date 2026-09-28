@@ -1,5 +1,4 @@
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using Bsync.Clocks;
 using Bsync.Documents;
 using Bsync.Protocol;
@@ -220,15 +219,3 @@ public static class Harness
 
     private sealed record Replica(IndexedDbLocalStore<ConformanceDocument> Store, SyncEngine<ConformanceDocument> Engine);
 }
-
-public sealed record CaseResult(string Name, bool Passed, string? Error);
-
-public sealed record SyncSummary(int Pulled, int Pushed, int Conflicts, bool Complete, bool Reset, int Missing);
-
-public sealed record DocumentView(string Id, string Title, bool Deleted, bool Dirty);
-
-[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
-[JsonSerializable(typeof(List<CaseResult>))]
-[JsonSerializable(typeof(SyncSummary))]
-[JsonSerializable(typeof(List<DocumentView>))]
-internal sealed partial class HarnessJson : JsonSerializerContext;

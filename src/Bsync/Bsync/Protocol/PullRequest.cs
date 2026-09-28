@@ -1,0 +1,13 @@
+using System.Text.Json.Serialization;
+
+namespace Bsync.Protocol;
+
+/// <summary>
+/// A request for the next page of the server's change feed, starting strictly after
+/// <see cref="Since"/>.
+/// </summary>
+/// <param name="Since">The client's stored checkpoint. <see cref="Checkpoint.Start"/> for a full sync.</param>
+/// <param name="BatchSize">The maximum number of changes the server may return (at least 1).</param>
+public readonly record struct PullRequest(
+    [property: JsonPropertyName("checkpoint"), JsonRequired] Checkpoint Since,
+    [property: JsonPropertyName("limit"), JsonRequired] int BatchSize);

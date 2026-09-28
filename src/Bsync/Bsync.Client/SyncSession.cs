@@ -1,88 +1,10 @@
 using Bsync.Clocks;
-using Bsync.Conflicts;
 using Bsync.Storage;
 using Bsync.Transport;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Bsync.Client;
-
-/// <summary>A local replica opened for one account: its store and the HLC node id to stamp writes with.</summary>
-/// <typeparam name="TDocument">The synchronized entity type.</typeparam>
-/// <param name="Store">The durable local store (disposed by the session if it implements <see cref="IAsyncDisposable"/>).</param>
-/// <param name="NodeId">A node id unique to this replica incarnation (for example <see cref="ReplicaIdentity.Incarnation"/>).</param>
-public sealed record LocalReplica<TDocument>(ILocalStore<TDocument> Store, string NodeId)
-    where TDocument : class, ISyncEntity;
-
-/// <summary>Configuration of a <see cref="SyncSession{TDocument}"/>.</summary>
-/// <typeparam name="TDocument">The synchronized entity type.</typeparam>
-public sealed record SyncSessionOptions<TDocument>
-    where TDocument : class, ISyncEntity
-{
-    /// <summary>Opens the replica for an account. Each account must get its own storage.</summary>
-    public required Func<string, CancellationToken, Task<LocalReplica<TDocument>>> OpenReplica { get; init; }
-
-    /// <summary>Creates the transport used for an account (its credentials belong to that account).</summary>
-    public required Func<string, ISyncTransport<TDocument>> CreateTransport { get; init; }
-
-    /// <summary>Deep-clone function for documents (trim/AOT safe, for example <c>DocumentCloner.Json</c>).</summary>
-    public required Func<TDocument, TDocument> Cloner { get; init; }
-
-    /// <summary>
-    /// Takes the replication lease for an account, or returns <see langword="null"/> if another instance (tab)
-    /// holds it. When not set, this session always replicates.
-    /// </summary>
-    public Func<string, CancellationToken, Task<IAsyncDisposable?>>? AcquireLease { get; init; }
-
-    /// <summary>Conflict policy. Default: the engine's default.</summary>
-    public IConflictHandler<TDocument>? ConflictHandler { get; init; }
-
-    /// <summary>Engine batch sizes and budgets.</summary>
-    public SyncOptions<TDocument>? EngineOptions { get; init; }
-
-    /// <summary>A short host description reported in <see cref="SyncCapabilities.Host"/>. Default <c>local</c>.</summary>
-    public string Host { get; init; } = "local";
-
-    /// <summary>Time between syncs when idle. Default 30 seconds.</summary>
-    public TimeSpan Interval { get; init; } = TimeSpan.FromSeconds(30);
-
-    /// <summary>First retry delay after a transient failure. Default 1 second.</summary>
-    public TimeSpan MinBackoff { get; init; } = TimeSpan.FromSeconds(1);
-
-    /// <summary>Longest retry delay. Default 5 minutes.</summary>
-    public TimeSpan MaxBackoff { get; init; } = TimeSpan.FromMinutes(5);
-
-    /// <summary>How often a follower (no lease) announces possible changes made by the owner. Default 2 seconds.</summary>
-    public TimeSpan FollowerRefresh { get; init; } = TimeSpan.FromSeconds(2);
-
-    /// <summary>Time source for delays (tests use a fake). Default <see cref="TimeProvider.System"/>.</summary>
-    public TimeProvider TimeProvider { get; init; } = TimeProvider.System;
-
-    /// <summary>
-    /// Listen to the transport's hint stream (<see cref="ISyncTransport{TDocument}.StreamAsync"/>) and sync as soon
-    /// as the server announces a change. Hints only shorten the wait: a missed hint delays synchronization until
-    /// the next interval, never loses data (I13). Default <see langword="false"/>.
-    /// </summary>
-    public bool LiveHints { get; init; }
-
-    /// <summary>
-    /// Called when a replica opens; returns something to dispose when it closes. Hosts use it to connect platform
-    /// events (browser <c>online</c>/visibility, native resume) to <see cref="SyncSession{TDocument}.RequestSync"/>.
-    /// </summary>
-    public Func<SyncSession<TDocument>, string, CancellationToken, Task<IAsyncDisposable?>>? AttachLifecycle { get; init; }
-
-    /// <summary>
-    /// Called when the server answers <c>unauthorized</c>. Return <see langword="true"/> after renewing credentials
-    /// to retry at once; otherwise the session reports <see cref="SyncState.AttentionRequired"/>.
-    /// </summary>
-    public Func<string, CancellationToken, Task<bool>>? RenewCredentials { get; init; }
-
-    /// <summary>
-    /// Receives state changes and failures (category <c>Bsync.SyncSession</c>). Messages carry states, counts and
-    /// error codes, never document data or account names. The DI recipes use the container's logger factory.
-    /// </summary>
-    public ILogger? Logger { get; init; }
-}
 
 /// <summary>
 /// Owns one local replica and its replication loop: opens the replica for the current account, syncs when
@@ -558,17 +480,4 @@ public sealed class SyncSession<TDocument> : IAsyncDisposable
 
         public IAsyncDisposable? Lease { get; set; }
     }
-}
-
-/// <summary>Structured, allocation-free log messages for <see cref="SyncSession{TDocument}"/>.</summary>
-internal static partial class SessionLog
-{
-    [LoggerMessage(EventId = 1, EventName = "SyncStateChanged", Message = "Sync ({Host}) {Previous} -> {State}; {Pending} pending. {Detail}")]
-    public static partial void StateChanged(ILogger logger, LogLevel level, string host, SyncState previous, SyncState state, int pending, string? detail);
-
-    [LoggerMessage(EventId = 2, EventName = "SyncProtocolError", Level = LogLevel.Error, Message = "Sync ({Host}) stopped: the server sent an invalid response.")]
-    public static partial void ProtocolError(ILogger logger, string host, Exception error);
-
-    [LoggerMessage(EventId = 3, EventName = "SyncUnexpectedError", Level = LogLevel.Error, Message = "Sync ({Host}) stopped by an unexpected error.")]
-    public static partial void UnexpectedError(ILogger logger, string host, Exception error);
 }

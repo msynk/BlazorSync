@@ -194,11 +194,3 @@ public sealed class LocalSyncCollection<TDocument> : ISyncCollection<TDocument>
         return await _session.GetEngineAsync(account, cancellationToken).ConfigureAwait(false);
     }
 }
-
-/// <summary>Runs an action once on dispose.</summary>
-internal sealed class Unsubscriber(Action action) : IDisposable
-{
-    private Action? _action = action;
-
-    public void Dispose() => Interlocked.Exchange(ref _action, null)?.Invoke();
-}

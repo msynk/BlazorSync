@@ -1,12 +1,9 @@
 using System.Globalization;
-using System.Text.Json.Serialization;
 using Bsync;
 using Bsync.Clocks;
 using Bsync.Documents;
-using Bsync.Protocol;
 using Bsync.Storage;
 using Bsync.Storage.Sqlite;
-using Bsync.Transport;
 
 // Usage:
 //   writes <db> <count>          local writes through SyncEngine; prints "committed <i> <timestamp>" after each receipt
@@ -49,30 +46,4 @@ switch (mode)
 
     default:
         throw new ArgumentException($"Unknown mode '{mode}'.");
-}
-
-// Same JSON shape as the tests' Note type (property names are not changed by a naming policy).
-public sealed class CrashNote : ISyncEntity
-{
-    public string Id { get; set; } = string.Empty;
-
-    public HlcTimestamp UpdatedAt { get; set; }
-
-    public bool Deleted { get; set; }
-
-    public string Title { get; set; } = string.Empty;
-
-    public string Body { get; set; } = string.Empty;
-}
-
-[JsonSerializable(typeof(CrashNote))]
-public sealed partial class CrashJson : JsonSerializerContext;
-
-internal sealed class NoNetwork : ISyncTransport<CrashNote>
-{
-    public Task<PullResult<CrashNote>> PullAsync(PullRequest request, CancellationToken cancellationToken = default) => throw new IOException("offline");
-
-    public Task<PushResult<CrashNote>> PushAsync(PushRequest<CrashNote> request, CancellationToken cancellationToken = default) => throw new IOException("offline");
-
-    public IAsyncEnumerable<StreamEvent<CrashNote>> StreamAsync(Checkpoint since, CancellationToken cancellationToken = default) => throw new IOException("offline");
 }

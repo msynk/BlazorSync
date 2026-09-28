@@ -4,18 +4,6 @@ using Xunit;
 
 namespace Bsync.Tests.Browser;
 
-/// <summary>Skipped unless <c>BSYNC_POSTGRES</c> names a PostgreSQL server where the user may create databases.</summary>
-public sealed class PostgresTheoryAttribute : TheoryAttribute
-{
-    public PostgresTheoryAttribute()
-    {
-        if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("BSYNC_POSTGRES")))
-        {
-            Skip = "Set BSYNC_POSTGRES to run tests against PostgreSQL.";
-        }
-    }
-}
-
 /// <summary>
 /// T24 I05 I06 I13: two server processes share one PostgreSQL database; browsers connected to different processes see
 /// each other's notes (commit hints cross processes through LISTEN/NOTIFY), and data survives a server restart.

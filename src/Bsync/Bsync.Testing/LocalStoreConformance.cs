@@ -1,41 +1,7 @@
-using System.Text.Json.Serialization;
 using Bsync.Clocks;
 using Bsync.Storage;
 
 namespace Bsync.Testing;
-
-/// <summary>The document type used by the conformance cases.</summary>
-public sealed class ConformanceDocument : ISyncEntity
-{
-    /// <inheritdoc />
-    public string Id { get; set; } = string.Empty;
-
-    /// <inheritdoc />
-    public HlcTimestamp UpdatedAt { get; set; }
-
-    /// <inheritdoc />
-    public bool Deleted { get; set; }
-
-    /// <summary>Payload used to detect aliasing and lost updates.</summary>
-    public string Title { get; set; } = string.Empty;
-}
-
-/// <summary>Source-generated JSON metadata for <see cref="ConformanceDocument"/> and its protocol messages.</summary>
-[JsonSerializable(typeof(ConformanceDocument))]
-[JsonSerializable(typeof(Protocol.PullRequest))]
-[JsonSerializable(typeof(Protocol.PullResult<ConformanceDocument>))]
-[JsonSerializable(typeof(Protocol.PushRequest<ConformanceDocument>))]
-[JsonSerializable(typeof(Protocol.PushResult<ConformanceDocument>))]
-public sealed partial class ConformanceJsonContext : JsonSerializerContext;
-
-/// <summary>One conformance case.</summary>
-/// <param name="Name">Stable name, including the invariant ids it checks.</param>
-/// <param name="RunAsync">Runs the case against stores created by the factory (each call returns a new, empty store).</param>
-public sealed record ConformanceCase(string Name, Func<Func<Task<ILocalStore<ConformanceDocument>>>, Task> RunAsync)
-{
-    /// <inheritdoc />
-    public override string ToString() => Name;
-}
 
 /// <summary>
 /// The behaviour every <see cref="ILocalStore{TDocument}"/> must provide (ADR-004). A provider is not supported

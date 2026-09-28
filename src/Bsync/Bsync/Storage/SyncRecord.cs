@@ -86,39 +86,3 @@ public sealed record SyncRecord<TDocument>(TDocument Current, TDocument? Base, b
         (var b, var o) => b ?? o,
     };
 }
-
-/// <summary>An immutable, persisted push operation.</summary>
-/// <typeparam name="TDocument">The synchronized entity type.</typeparam>
-/// <param name="OperationId">The globally unique operation id sent to the server.</param>
-/// <param name="Revision">The <see cref="SyncRecord{TDocument}.LocalRevision"/> the payload was taken from.</param>
-/// <param name="BaseVersion">The server version the operation is based on.</param>
-/// <param name="Payload">The exact document state sent to the server.</param>
-public sealed record PendingOperation<TDocument>(string OperationId, long Revision, long? BaseVersion, TDocument Payload)
-    where TDocument : class, ISyncEntity
-{
-    /// <summary>The dependency group sent with the operation, if any.</summary>
-    public string? Group { get; init; }
-
-    /// <summary>The number of operations of <see cref="Group"/> sent together (0 without a group).</summary>
-    public int GroupSize { get; init; }
-}
-
-/// <summary>A set of documents whose changes must be applied together (all or nothing).</summary>
-/// <param name="Id">The group id.</param>
-/// <param name="Members">The ids of the documents in the group.</param>
-public sealed record SyncGroup(string Id, IReadOnlyList<string> Members);
-
-/// <summary>A permanent server rejection of one local revision.</summary>
-/// <param name="Revision">The local revision that was rejected.</param>
-/// <param name="ErrorCode">The server's machine-readable reason.</param>
-/// <param name="Message">The server's explanation, if any.</param>
-public sealed record SyncRejection(long Revision, string ErrorCode, string? Message);
-
-/// <summary>A conflict kept for later resolution.</summary>
-/// <typeparam name="TDocument">The synchronized entity type.</typeparam>
-/// <param name="Server">The server state the local change conflicted with.</param>
-/// <param name="ServerVersion">The server version of <paramref name="Server"/>.</param>
-/// <param name="Local">The local change that was not applied.</param>
-/// <param name="Base">The common ancestor the local change was made from, if known.</param>
-public sealed record SyncConflict<TDocument>(TDocument Server, long ServerVersion, TDocument Local, TDocument? Base)
-    where TDocument : class, ISyncEntity;

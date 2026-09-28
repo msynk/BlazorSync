@@ -1,40 +1,6 @@
 namespace Bsync.Clocks;
 
 /// <summary>
-/// Provides the current wall-clock time in Unix milliseconds. Abstracted so tests can supply a
-/// deterministic clock and so platforms with a constrained time source can substitute their own.
-/// </summary>
-public interface IPhysicalClock
-{
-    /// <summary>Returns the current time in Unix milliseconds.</summary>
-    long NowMilliseconds();
-}
-
-/// <summary>Default <see cref="IPhysicalClock"/> backed by the system UTC clock.</summary>
-public sealed class SystemPhysicalClock : IPhysicalClock
-{
-    /// <summary>A shared, stateless instance.</summary>
-    public static readonly SystemPhysicalClock Instance = new();
-
-    /// <inheritdoc />
-    public long NowMilliseconds() => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-}
-
-/// <summary>Thrown when a remote timestamp is further ahead of local physical time than allowed.</summary>
-public sealed class ClockDriftException : InvalidOperationException
-{
-    /// <summary>Creates the exception.</summary>
-    public ClockDriftException(HlcTimestamp remote, long physicalNow, TimeSpan maxForwardDrift)
-        : base($"Remote timestamp {remote} is more than {maxForwardDrift} ahead of local physical time {physicalNow}.")
-    {
-        Remote = remote;
-    }
-
-    /// <summary>The rejected remote timestamp.</summary>
-    public HlcTimestamp Remote { get; }
-}
-
-/// <summary>
 /// A thread-safe Hybrid Logical Clock implementing the algorithm of Kulkarni et al.
 /// <para>
 /// Call <see cref="Now"/> when generating a local event (for example stamping a write) and

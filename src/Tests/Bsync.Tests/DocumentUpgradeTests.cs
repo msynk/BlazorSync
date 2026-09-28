@@ -1,5 +1,4 @@
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using Bsync.Clocks;
 using Bsync.Documents;
 using Bsync.Server;
@@ -9,50 +8,6 @@ using Bsync.Tests.Sqlite;
 using Xunit;
 
 namespace Bsync.Tests;
-
-/// <summary>Version 1 of an application's document: a "title".</summary>
-public sealed class TaskV1 : ISyncEntity
-{
-    public string Id { get; set; } = string.Empty;
-
-    public HlcTimestamp UpdatedAt { get; set; }
-
-    public bool Deleted { get; set; }
-
-    public string Title { get; set; } = string.Empty;
-
-    [JsonExtensionData]
-    public Dictionary<string, JsonElement>? Unknown { get; set; }
-}
-
-/// <summary>Version 2 renamed "title" to "heading" and added "done"; it upgrades version 1 documents when reading them.</summary>
-public sealed class TaskV2 : ISyncEntity, IJsonOnDeserialized
-{
-    public string Id { get; set; } = string.Empty;
-
-    public HlcTimestamp UpdatedAt { get; set; }
-
-    public bool Deleted { get; set; }
-
-    public string Heading { get; set; } = string.Empty;
-
-    public bool Done { get; set; }
-
-    [JsonExtensionData]
-    public Dictionary<string, JsonElement>? Unknown { get; set; }
-
-    void IJsonOnDeserialized.OnDeserialized()
-    {
-        if (DocumentUpgrade.TryTake(Unknown, "Title", out var title) && Heading.Length == 0)
-        {
-            Heading = title.GetString() ?? string.Empty;
-        }
-    }
-}
-
-[JsonSerializable(typeof(TaskV1))]
-[JsonSerializable(typeof(TaskV2))]
-public sealed partial class TaskJson : JsonSerializerContext;
 
 /// <summary>I17: documents written by an older application version are upgraded wherever they are read.</summary>
 public sealed class DocumentUpgradeTests : IDisposable

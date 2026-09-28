@@ -1,44 +1,10 @@
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using Bsync.Clocks;
 using Bsync.Conflicts;
 using Bsync.Tests.TestSupport;
 using Xunit;
 
 namespace Bsync.Tests;
-
-public sealed class Card : ISyncEntity
-{
-    public string Id { get; set; } = "c1";
-
-    public HlcTimestamp UpdatedAt { get; set; }
-
-    public bool Deleted { get; set; }
-
-    public string Title { get; set; } = string.Empty;
-
-    public List<string> Tags { get; set; } = [];
-
-    public Address Address { get; set; } = new();
-
-    public int Views { get; set; }
-
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? Due { get; set; }
-
-    [JsonExtensionData]
-    public Dictionary<string, JsonElement>? Unknown { get; set; }
-}
-
-public sealed class Address
-{
-    public string Street { get; set; } = string.Empty;
-
-    public string City { get; set; } = string.Empty;
-}
-
-[JsonSerializable(typeof(Card))]
-public sealed partial class CardJsonContext : JsonSerializerContext;
 
 /// <summary>ADR-006, I11: field-level three-way merge semantics and the merging conflict handler.</summary>
 public sealed class ThreeWayMergeTests

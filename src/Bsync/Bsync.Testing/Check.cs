@@ -2,12 +2,6 @@ using System.Runtime.CompilerServices;
 
 namespace Bsync.Testing;
 
-/// <summary>Thrown when a conformance expectation fails.</summary>
-public sealed class ConformanceFailure(string message) : Exception(message);
-
-/// <summary>Thrown by conformance cases to simulate a failure inside a transform.</summary>
-public sealed class ConformanceFault(string message) : Exception(message);
-
 /// <summary>Minimal assertions with no test-framework dependency, so cases can run in any host.</summary>
 public static class Check
 {

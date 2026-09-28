@@ -7,66 +7,6 @@ using Microsoft.Data.Sqlite;
 
 namespace Bsync.Storage.Sqlite;
 
-/// <summary>How a <see cref="SqliteLocalStore{TDocument}"/> trades write latency for durability.</summary>
-public enum SqliteDurability
-{
-    /// <summary>
-    /// <c>synchronous=FULL</c> in WAL mode: a committed write survives process termination and, subject to
-    /// the storage hardware honouring flushes, power loss. Default.
-    /// </summary>
-    Full = 0,
-
-    /// <summary>
-    /// <c>synchronous=NORMAL</c> in WAL mode: a committed write survives process termination; the most
-    /// recent commits may be lost (without corruption) on power loss or OS crash.
-    /// </summary>
-    Normal = 1,
-}
-
-/// <summary>Options for <see cref="SqliteLocalStore{TDocument}"/>.</summary>
-public sealed class SqliteLocalStoreOptions
-{
-    /// <summary>Path of the database file. Created if missing.</summary>
-    public required string DataSource { get; init; }
-
-    /// <summary>
-    /// Collection name. Several collections may share one database file; each has its own records,
-    /// checkpoint, generation and clock high-water mark.
-    /// </summary>
-    public string Collection { get; init; } = "default";
-
-    /// <summary>Durability level. Default <see cref="SqliteDurability.Full"/>.</summary>
-    public SqliteDurability Durability { get; init; } = SqliteDurability.Full;
-
-    /// <summary>How long a writer waits for another connection's write lock. Default 30 seconds.</summary>
-    public TimeSpan BusyTimeout { get; init; } = TimeSpan.FromSeconds(30);
-}
-
-/// <summary>Connection-pool helpers.</summary>
-public static class SqliteStorePool
-{
-    /// <summary>
-    /// Closes the pooled connections to one database file (for example before copying, restoring or deleting it).
-    /// Unlike <see cref="SqliteConnection.ClearAllPools"/>, it does not touch other databases' connections.
-    /// </summary>
-    public static void Release(string dataSource)
-    {
-        ArgumentException.ThrowIfNullOrEmpty(dataSource);
-        using var connection = new SqliteConnection(ConnectionString(dataSource));
-        SqliteConnection.ClearPool(connection);
-    }
-
-    internal static string ConnectionString(string dataSource) => new SqliteConnectionStringBuilder
-    {
-        DataSource = dataSource,
-        Mode = SqliteOpenMode.ReadWriteCreate,
-        Pooling = true,
-    }.ToString();
-}
-
-/// <summary>Thrown when a database was created by a newer, unsupported version of the store.</summary>
-public sealed class SqliteStoreSchemaException(string message) : NotSupportedException(message);
-
 /// <summary>
 /// A durable <see cref="ILocalStore{TDocument}"/> backed by SQLite (Microsoft.Data.Sqlite), for native
 /// hosts. Every <see cref="UpdateAsync"/> is one <c>BEGIN IMMEDIATE</c> transaction, so updates from any
@@ -634,7 +574,3 @@ public sealed class SqliteLocalStore<TDocument> : ILocalStore<TDocument>
     private TDocument Deserialize(string json) =>
         JsonSerializer.Deserialize(json, _typeInfo) ?? throw new InvalidDataException("A stored document deserialized to null.");
 }
-
-/// <summary>Source-generated JSON for the store's own metadata columns.</summary>
-[System.Text.Json.Serialization.JsonSerializable(typeof(string[]))]
-internal sealed partial class SqliteJson : System.Text.Json.Serialization.JsonSerializerContext;

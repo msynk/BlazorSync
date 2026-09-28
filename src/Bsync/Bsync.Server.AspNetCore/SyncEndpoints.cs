@@ -13,26 +13,6 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Bsync.Server.AspNetCore;
 
-/// <summary>Options for one mapped collection.</summary>
-public sealed class SyncEndpointOptions
-{
-    /// <summary>
-    /// Application schema identifiers this server accepts in the <c>Bsync-Schema</c> header. Other
-    /// values are refused with <c>upgrade-required</c> before anything is read or written.
-    /// </summary>
-    public required IReadOnlySet<string> SupportedSchemas { get; init; }
-
-    /// <summary>
-    /// Derives the caller's scope (for example a tenant id) from the authenticated request. Return
-    /// <see langword="null"/> to refuse the request with <c>forbidden</c>. Never read the scope from the
-    /// request body or an unauthenticated header. Default: <c>"default"</c> for every caller.
-    /// </summary>
-    public Func<HttpContext, string?> ResolveScope { get; init; } = static _ => "default";
-
-    /// <summary>Maximum request body size in bytes. Larger bodies get <c>payload-too-large</c>. Default 4 MiB.</summary>
-    public long MaxRequestBodyBytes { get; init; } = 4 * 1024 * 1024;
-}
-
 /// <summary>Maps the Bsync HTTP binding (docs/protocol/v1.md §8).</summary>
 /// <remarks>
 /// <para>
@@ -389,14 +369,4 @@ public static class SyncEndpoints
         return Results.Problem(detail: detail, statusCode: status, extensions: extensions)
             .ExecuteAsync(http);
     }
-}
-
-/// <summary>Structured log messages for the endpoints. Bodies, document ids and principals are never logged.</summary>
-internal static partial class ServerLog
-{
-    [LoggerMessage(EventId = 1, EventName = "SyncRequestRefused", Message = "Sync {Endpoint} for '{Collection}' refused: {Status} {Code} {Reason}")]
-    public static partial void Refused(ILogger logger, LogLevel level, string collection, string endpoint, int status, string code, string? reason);
-
-    [LoggerMessage(EventId = 2, EventName = "SyncAuthorityFailed", Level = LogLevel.Error, Message = "Sync {Endpoint} for '{Collection}' failed in the authority.")]
-    public static partial void AuthorityFailed(ILogger logger, string collection, string endpoint, Exception error);
 }

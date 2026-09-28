@@ -1,31 +1,5 @@
 namespace Bsync.Demo.Services;
 
-/// <summary>The severity/category of an <see cref="ActivityEntry"/>, used for colour-coding in the UI.</summary>
-public enum ActivityKind
-{
-    /// <summary>A local read/write on a device.</summary>
-    Local,
-
-    /// <summary>A network sync operation.</summary>
-    Sync,
-
-    /// <summary>A conflict was detected and resolved.</summary>
-    Conflict,
-
-    /// <summary>An offline/connectivity event.</summary>
-    Network,
-
-    /// <summary>A workspace-level event (reset, device added).</summary>
-    System,
-}
-
-/// <summary>A single timestamped entry in the activity log.</summary>
-/// <param name="Time">When it happened (wall clock).</param>
-/// <param name="Kind">The category.</param>
-/// <param name="Source">The device or component that produced it.</param>
-/// <param name="Message">Human-readable description.</param>
-public sealed record ActivityEntry(DateTimeOffset Time, ActivityKind Kind, string Source, string Message);
-
 /// <summary>
 /// A small in-memory, observable activity log. Components subscribe to <see cref="Changed"/> to
 /// re-render when new entries arrive.

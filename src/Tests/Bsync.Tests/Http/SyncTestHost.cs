@@ -7,7 +7,6 @@ using Bsync.Tests.TestSupport;
 using Bsync.Transport.Http;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -109,16 +108,4 @@ public sealed class SyncTestHost : IAsyncDisposable
             return Task.FromResult(AuthenticateResult.Success(new AuthenticationTicket(principal, SchemeName)));
         }
     }
-}
-
-/// <summary>An authority that always delegates to the server an <see cref="InMemorySyncServerRef"/> currently holds (so restores are visible over HTTP).</summary>
-public sealed class RefAuthority(InMemorySyncServerRef server) : ISyncAuthority<Note>
-{
-    public AuthorityLimits Limits => server.Server.Limits;
-
-    public Task<PullResult<Note>> PullAsync(SyncCallContext context, PullRequest request, CancellationToken cancellationToken = default) =>
-        server.Server.PullAsync(context, request, cancellationToken);
-
-    public Task<PushResult<Note>> PushAsync(SyncCallContext context, PushRequest<Note> request, CancellationToken cancellationToken = default) =>
-        server.Server.PushAsync(context, request, cancellationToken);
 }
